@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:ui="http://schemas.microsoft.com/wix/2006/wi/ui">
+  <Product Id="*"
+           Name="YouTubeDownloader"
+           Language="1033"
+           Version="1.0.0"
+           Manufacturer="Your Company"
+           UpgradeCode="d2ab0bd7-6c4c-4c2f-a1b6-1a2c6e3e9b81">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="YouTubeDownloader" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+
+    <!-- UI Configuration -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+    <UIRef Id="WixUI_InstallDir" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLDIR" Name="YouTubeDownloader" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppShortcutFolder" Name="YouTubeDownloader" />
+      </Directory>
+    </Directory>
+
+    <!-- Start Menu shortcut -->
+    <DirectoryRef Id="AppShortcutFolder">
+      <Component Id="ApplicationShortcuts" Guid="*">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="YouTubeDownloader"
+                  Description="YouTube Downloader"
+                  Target="[INSTALLDIR]YouTubeDownloader.exe"
+                  WorkingDirectory="INSTALLDIR" />
+        <RemoveFolder Id="RemoveShortcutDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\YouTubeDownloader" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Shortcuts" Title="Shortcuts" Level="1">
+      <ComponentRef Id="ApplicationShortcuts" />
+    </Feature>
+
+  </Product>
+</Wix> 

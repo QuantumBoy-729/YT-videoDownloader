@@ -10,6 +10,7 @@ A simple and user-friendly YouTube downloader application with a graphical user 
 - **Custom download location**: Select where to save your downloads
 - **Real-time progress**: See download progress and logs in real-time
 - **Automatic dependency management**: Automatically installs yt-dlp if not present
+- **Professional installer**: MSI installer built with WiX and PyInstaller
 
 ## Requirements
 
@@ -49,6 +50,18 @@ A simple and user-friendly YouTube downloader application with a graphical user 
    - Watch the status updates in the status bar
    - View detailed logs in the log area at the bottom
    - The progress bar shows download activity
+
+## Building the Installer
+
+To build the MSI installer:
+
+```powershell
+.\build_final.ps1 -Version 1.0.0
+```
+
+This will create:
+- `dist\YouTubeDownloader.exe` - Standalone executable
+- `YouTubeDownloader-1.0.0.msi` - Professional Windows installer
 
 ## Supported URLs
 
@@ -91,6 +104,7 @@ This tool is for personal use only. Please respect YouTube's Terms of Service an
 - **GUI**: Python Tkinter
 - **Threading**: Uses separate threads for downloads to keep UI responsive
 - **Cross-platform**: Works on Windows, macOS, and Linux
+- **Build tools**: PyInstaller for EXE, WiX for MSI installer
 
 ## Contributing
 

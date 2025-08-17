@@ -7,6 +7,26 @@ import subprocess
 import json
 from pathlib import Path
 
+# Configure SSL certificates for standalone executable
+def setup_ssl_for_standalone():
+    """Configure SSL certificates for standalone executable"""
+    if getattr(sys, 'frozen', False):
+        # We're running as a frozen executable
+        executable_dir = Path(sys.executable).parent
+        cacert_path = executable_dir / 'lib' / 'cacert.pem'
+        
+        if cacert_path.exists():
+            # Set environment variables for SSL certificate verification
+            os.environ['SSL_CERT_FILE'] = str(cacert_path)
+            os.environ['REQUESTS_CA_BUNDLE'] = str(cacert_path)
+            os.environ['CURL_CA_BUNDLE'] = str(cacert_path)
+            print(f"SSL certificates configured: {cacert_path}")
+        else:
+            print(f"Warning: SSL certificate bundle not found at {cacert_path}")
+
+# Initialize SSL configuration
+setup_ssl_for_standalone()
+
 class YouTubeDownloaderGUI:
     def __init__(self, root):
         self.root = root

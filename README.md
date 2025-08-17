@@ -1,39 +1,59 @@
-# YouTube Downloader
+# YouTube Downloader with Download Controls
 
-A simple and user-friendly YouTube downloader application with a graphical user interface built using Python and Tkinter.
+A professional YouTube downloader application with **pause/resume/stop** functionality and a modern graphical interface built using Python and Tkinter.
 
-## Features
+## 🚀 **READY TO USE - Single File Executable Available!**
 
-- **Easy-to-use GUI**: Clean and intuitive interface
-- **Multiple formats**: Download videos in MP4, WebM, or extract audio as MP3
-- **Quality selection**: Choose from various quality options (144p to 1080p or best available)
-- **Custom download location**: Select where to save your downloads
-- **Real-time progress**: See download progress and logs in real-time
-- **Automatic dependency management**: Automatically installs yt-dlp if not present
-- **Professional installer**: MSI installer built with WiX and PyInstaller
+**Download the ready-to-use executable:** [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe) (21.3 MB)
+- ✅ **Zero dependencies** - No Python installation required
+- ✅ **Copy & Run** - Works on any Windows machine
+- ✅ **Complete features** - All download controls included
 
-## Requirements
+## 🎯 Enhanced Features
 
+- **🎮 Download Controls**: Pause, Resume, and Stop downloads mid-process
+- **📊 Real-time Progress**: Live progress bars and status updates
+- **🎯 Smart State Management**: Intelligent button enabling/disabling
+- **🖥️ Easy-to-use GUI**: Clean and intuitive interface with modern controls
+- **📺 Multiple formats**: Download videos in MP4, WebM, or extract audio as MP3
+- **🎬 Quality selection**: Choose from various quality options (144p to 1080p or best available)
+- **📁 Custom download location**: Select where to save your downloads
+- **⚡ Real-time feedback**: See download progress and logs in real-time
+- **🔧 Automatic dependency management**: Automatically installs yt-dlp if not present
+- **📦 Professional distribution**: Both MSI installer and single-file executable
+
+## 🚀 Quick Start Options
+
+### Option 1: Ready-to-Use Executable (Recommended)
+1. **Download**: [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe) (21.3 MB)
+2. **Run**: Double-click the executable - that's it!
+3. **No installation required** - works on any Windows machine
+
+### Option 2: Run from Source
+**Requirements:**
 - Python 3.6 or higher
 - Internet connection
 
-## Installation
-
-1. **Install Python**: If you don't have Python installed, download and install it from [python.org](https://www.python.org/downloads/). Make sure to check "Add Python to PATH" during installation.
-
-2. **Clone or download this repository**:
+**Installation:**
+1. **Install Python**: Download from [python.org](https://www.python.org/downloads/)
+2. **Clone this repository**:
    ```bash
-   git clone <repository-url>
-   cd youtube-downloader
+   git clone https://github.com/QuantumBoy-729/YT-videoDownloader.git
+   cd YT-videoDownloader
    ```
-
-3. **Install dependencies** (optional - the app will auto-install yt-dlp):
+3. **Install dependencies** (optional - auto-installed):
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
+## 🎮 Usage
 
+### Using the Executable
+1. **Download** the [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe)
+2. **Double-click** to launch the application
+3. **Enter** a YouTube URL and start downloading!
+
+### Running from Source
 1. **Run the application**:
    ```bash
    python youtube_downloader.py

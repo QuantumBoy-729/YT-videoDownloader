@@ -1,1 +1,3 @@
 yt-dlp>=2023.7.6
+yt-dlp-hianime @ https://github.com/pratikpatel8982/yt-dlp-hianime/archive/master.zip
+requests>=2.25.0

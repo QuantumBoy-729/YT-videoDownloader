@@ -1,1 +1,0 @@
-# yt-dlp plugin namespace

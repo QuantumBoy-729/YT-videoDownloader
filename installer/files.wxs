@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <DirectoryRef Id="INSTALLDIR">
+            <Component Id="cmp8E69CC1DE830C8567E212F43C9C801FC" Guid="{DA747F77-CD59-42E9-B0C0-018490292A4D}">
+                <File Id="filD4099A77B26505AB1B50424A1DCF4115" KeyPath="yes" Source="$(var.DistDir)\YouTubeDownloader.exe" />
+            </Component>
+        </DirectoryRef>
+    </Fragment>
+    <Fragment>
+        <ComponentGroup Id="AppFiles">
+            <ComponentRef Id="cmp8E69CC1DE830C8567E212F43C9C801FC" />
+        </ComponentGroup>
+    </Fragment>
+</Wix>

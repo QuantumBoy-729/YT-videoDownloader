@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.env
+
+# Virtual environments
+.venv/
+venv/
+
+# PyInstaller
+*.manifest
+*.spec
+dist/
+build/
+
+# cx_Freeze
+build/
+
+# Installer files
+*.exe
+*.msi
+*.wixpdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+plugin_init.py
+extractor_init.py
+
+# Test files
+test_*.py
+
+# Documentation (keep main README.md)
+RESOLUTION_IMPROVEMENTS.md

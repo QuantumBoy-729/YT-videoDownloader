@@ -6,6 +6,9 @@ import sys
 import subprocess
 import json
 from pathlib import Path
+import queue
+import time
+import signal
 
 # Configure SSL certificates for standalone executable
 def setup_ssl_for_standalone():
@@ -27,6 +30,233 @@ def setup_ssl_for_standalone():
 # Initialize SSL configuration
 setup_ssl_for_standalone()
 
+class DownloadManager:
+    """Manages download operations with pause/resume/stop functionality"""
+    
+    def __init__(self):
+        self.is_downloading = False
+        self.is_paused = False
+        self.should_stop = False
+        self.current_process = None
+        self.download_thread = None
+        self.progress_callback = None
+        self.log_callback = None
+        self.completion_callback = None
+        self.temp_files = []
+        
+    def set_callbacks(self, progress_cb, log_cb, completion_cb):
+        """Set callback functions for progress, logging, and completion"""
+        self.progress_callback = progress_cb
+        self.log_callback = log_cb
+        self.completion_callback = completion_cb
+    
+    def start_download(self, url, format_type, quality, download_path):
+        """Start a new download"""
+        if self.is_downloading:
+            if self.log_callback:
+                self.log_callback("Download already in progress!")
+            return False
+        
+        self.is_downloading = True
+        self.is_paused = False
+        self.should_stop = False
+        
+        # Start download in a separate thread
+        self.download_thread = threading.Thread(
+            target=self._download_worker,
+            args=(url, format_type, quality, download_path)
+        )
+        self.download_thread.daemon = True
+        self.download_thread.start()
+        
+        return True
+    
+    def pause_download(self):
+        """Pause the current download"""
+        if self.is_downloading and not self.is_paused:
+            self.is_paused = True
+            if self.current_process:
+                try:
+                    # Send SIGSTOP to pause the process (Unix-like systems)
+                    if hasattr(signal, 'SIGSTOP'):
+                        os.kill(self.current_process.pid, signal.SIGSTOP)
+                    else:
+                        # For Windows, we'll use a different approach
+                        self.current_process.terminate()
+                except:
+                    pass
+            
+            if self.log_callback:
+                self.log_callback("Download paused")
+            if self.progress_callback:
+                self.progress_callback("Download paused")
+            return True
+        return False
+    
+    def resume_download(self):
+        """Resume a paused download"""
+        if self.is_downloading and self.is_paused:
+            self.is_paused = False
+            if self.current_process:
+                try:
+                    # Send SIGCONT to resume the process (Unix-like systems)
+                    if hasattr(signal, 'SIGCONT'):
+                        os.kill(self.current_process.pid, signal.SIGCONT)
+                except:
+                    pass
+            
+            if self.log_callback:
+                self.log_callback("Download resumed")
+            if self.progress_callback:
+                self.progress_callback("Downloading...")
+            return True
+        return False
+    
+    def stop_download(self):
+        """Stop the current download"""
+        if self.is_downloading:
+            self.should_stop = True
+            self.is_paused = False
+            
+            if self.current_process:
+                try:
+                    self.current_process.terminate()
+                    self.current_process.wait(timeout=5)
+                except:
+                    try:
+                        self.current_process.kill()
+                    except:
+                        pass
+            
+            self._cleanup()
+            
+            if self.log_callback:
+                self.log_callback("Download stopped")
+            if self.progress_callback:
+                self.progress_callback("Download stopped")
+            if self.completion_callback:
+                self.completion_callback(False)
+            
+            return True
+        return False
+    
+    def _cleanup(self):
+        """Clean up temporary files and reset state"""
+        self.is_downloading = False
+        self.is_paused = False
+        self.current_process = None
+        
+        # Clean up any temporary files
+        for temp_file in self.temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except:
+                pass
+        self.temp_files.clear()
+    
+    def _download_worker(self, url, format_type, quality, download_path):
+        """Worker method that performs the actual download"""
+        try:
+            # Check if we should stop before starting
+            if self.should_stop:
+                self._cleanup()
+                return
+            
+            # Use yt-dlp module for download with resume support
+            import yt_dlp
+            
+            # Build yt-dlp options with resume support
+            ydl_opts = {
+                'outtmpl': f'{download_path}/%(title)s.%(ext)s',
+                'continue_dl': True,  # Enable resume functionality
+                'part': True,        # Keep partial files for resume
+                'mtime': True,       # Preserve modification time
+            }
+            
+            # Set format based on selection
+            if format_type == "mp3":
+                ydl_opts.update({
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                    }]
+                })
+            elif format_type in ["mp4", "webm"]:
+                if quality == "best":
+                    ydl_opts['format'] = f'best[ext={format_type}]/best'
+                else:
+                    height = quality[:-1]  # Remove 'p'
+                    format_options = [
+                        f'best[height={height}][ext={format_type}]',
+                        f'best[height={height}]',
+                        f'best[ext={format_type}]',
+                        'best'
+                    ]
+                    ydl_opts['format'] = '/'.join(format_options)
+            
+            # Progress hook with pause/stop checking
+            def progress_hook(d):
+                # Check for stop/pause signals
+                if self.should_stop:
+                    raise yt_dlp.DownloadError("Download stopped by user")
+                
+                while self.is_paused and not self.should_stop:
+                    time.sleep(0.1)  # Wait while paused
+                
+                if d['status'] == 'downloading':
+                    try:
+                        percent = d.get('_percent_str', 'N/A')
+                        speed = d.get('_speed_str', 'N/A')
+                        if self.log_callback:
+                            self.log_callback(f"Downloading... {percent} at {speed}")
+                        if self.progress_callback:
+                            self.progress_callback(f"Downloading... {percent}")
+                    except:
+                        if self.log_callback:
+                            self.log_callback("Downloading...")
+                        if self.progress_callback:
+                            self.progress_callback("Downloading...")
+                elif d['status'] == 'finished':
+                    filename = d.get('filename', 'Unknown')
+                    if self.log_callback:
+                        self.log_callback(f"Downloaded: {filename}")
+                    if self.progress_callback:
+                        self.progress_callback("Processing...")
+            
+            ydl_opts['progress_hooks'] = [progress_hook]
+            
+            # Perform the download
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                if self.log_callback:
+                    self.log_callback(f"Starting download: {url}")
+                
+                ydl.download([url])
+                
+                if not self.should_stop:
+                    if self.log_callback:
+                        self.log_callback("Download completed successfully!")
+                    if self.progress_callback:
+                        self.progress_callback("Download completed!")
+                    if self.completion_callback:
+                        self.completion_callback(True)
+        
+        except yt_dlp.DownloadError as e:
+            if "stopped by user" not in str(e):
+                if self.log_callback:
+                    self.log_callback(f"Download error: {str(e)}")
+                if self.completion_callback:
+                    self.completion_callback(False)
+        except Exception as e:
+            if not self.should_stop:
+                if self.log_callback:
+                    self.log_callback(f"Error: {str(e)}")
+                if self.completion_callback:
+                    self.completion_callback(False)
+        finally:
+            self._cleanup()
+
 class YouTubeDownloaderGUI:
     def __init__(self, root):
         self.root = root
@@ -39,6 +269,14 @@ class YouTubeDownloaderGUI:
         self.url_var = tk.StringVar()
         self.format_var = tk.StringVar(value="mp4")
         self.quality_var = tk.StringVar(value="720p")
+        
+        # Initialize download manager
+        self.download_manager = DownloadManager()
+        self.download_manager.set_callbacks(
+            self.update_progress,
+            self.log_message,
+            self.on_download_complete
+        )
         
         self.setup_ui()
         
@@ -88,9 +326,22 @@ class YouTubeDownloaderGUI:
         browse_btn = ttk.Button(main_frame, text="Browse", command=self.browse_folder)
         browse_btn.grid(row=5, column=1, sticky=tk.E, pady=(0, 10))
         
-        # Download button
-        self.download_btn = ttk.Button(main_frame, text="Download", command=self.start_download)
-        self.download_btn.grid(row=6, column=0, columnspan=2, pady=10)
+        # Download control buttons frame
+        control_frame = ttk.Frame(main_frame)
+        control_frame.grid(row=6, column=0, columnspan=2, pady=10)
+        
+        # Download control buttons
+        self.download_btn = ttk.Button(control_frame, text="Download", command=self.start_download)
+        self.download_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pause_btn = ttk.Button(control_frame, text="Pause", command=self.pause_download, state="disabled")
+        self.pause_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.resume_btn = ttk.Button(control_frame, text="Resume", command=self.resume_download, state="disabled")
+        self.resume_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.stop_btn = ttk.Button(control_frame, text="Stop", command=self.stop_download, state="disabled")
+        self.stop_btn.pack(side=tk.LEFT, padx=(5, 0))
         
         # Progress bar
         self.progress_var = tk.StringVar(value="Ready")
@@ -113,6 +364,53 @@ class YouTubeDownloaderGUI:
         folder = filedialog.askdirectory(initialdir=self.download_path.get())
         if folder:
             self.download_path.set(folder)
+    
+    def pause_download(self):
+        """Pause the current download"""
+        if self.download_manager.pause_download():
+            self.pause_btn.config(state="disabled")
+            self.resume_btn.config(state="normal")
+            self.log_message("Download paused by user")
+    
+    def resume_download(self):
+        """Resume the paused download"""
+        if self.download_manager.resume_download():
+            self.pause_btn.config(state="normal")
+            self.resume_btn.config(state="disabled")
+            self.log_message("Download resumed by user")
+    
+    def stop_download(self):
+        """Stop the current download"""
+        if self.download_manager.stop_download():
+            self.reset_ui()
+            self.log_message("Download stopped by user")
+    
+    def update_progress(self, status):
+        """Update progress status (called by download manager)"""
+        self.progress_var.set(status)
+        self.root.update_idletasks()
+    
+    def on_download_complete(self, success):
+        """Handle download completion (called by download manager)"""
+        self.root.after(0, lambda: self._handle_completion(success))
+    
+    def _handle_completion(self, success):
+        """Handle download completion in main thread"""
+        self.reset_ui()
+        if success:
+            self.progress_var.set("Download completed successfully!")
+            messagebox.showinfo("Success", "Download completed successfully!")
+        else:
+            self.progress_var.set("Download failed!")
+            messagebox.showerror("Error", "Download failed!")
+    
+    def reset_ui(self):
+        """Reset UI to initial state"""
+        self.download_btn.config(state="normal")
+        self.pause_btn.config(state="disabled")
+        self.resume_btn.config(state="disabled")
+        self.stop_btn.config(state="disabled")
+        self.progress_bar.stop()
     
     def log_message(self, message):
         """Add message to log area"""
@@ -204,20 +502,37 @@ class YouTubeDownloaderGUI:
             return False
     
     def start_download(self):
-        """Start download in a separate thread"""
+        """Start download using the download manager"""
         if not self.url_var.get().strip():
             messagebox.showerror("Error", "Please enter a YouTube URL")
             return
-            
-        # Disable download button
-        self.download_btn.config(state="disabled")
-        self.progress_bar.start()
-        self.progress_var.set("Downloading...")
         
-        # Start download thread
-        thread = threading.Thread(target=self.download_video)
-        thread.daemon = True
-        thread.start()
+        # Check if a download is already in progress
+        if self.download_manager.is_downloading:
+            messagebox.showwarning("Warning", "A download is already in progress!")
+            return
+        
+        url = self.url_var.get().strip()
+        format_type = self.format_var.get()
+        quality = self.quality_var.get()
+        download_path = self.download_path.get()
+        
+        # Update UI for download start
+        self.download_btn.config(state="disabled")
+        self.pause_btn.config(state="normal")
+        self.resume_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
+        self.progress_bar.start()
+        self.progress_var.set("Starting download...")
+        
+        # Start download with download manager
+        if self.download_manager.start_download(url, format_type, quality, download_path):
+            self.log_message(f"Starting download: {url}")
+            self.log_message(f"Format: {format_type}, Quality: {quality}")
+            self.log_message(f"Download path: {download_path}")
+        else:
+            self.reset_ui()
+            messagebox.showerror("Error", "Failed to start download")
     
     def get_best_format_for_quality(self, url, format_type, quality):
         """Get the best format ID that matches the requested quality"""
@@ -348,6 +663,7 @@ class YouTubeDownloaderGUI:
             self.log_message(f"Could not fetch available formats: {str(e)}")
             return []
     
+    # Old download_video method - DEPRECATED - replaced by DownloadManager
     def download_video(self):
         """Download video using yt-dlp"""
         try:

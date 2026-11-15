@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, YoutubeDLError
 
+from . import site_fixes  # noqa: F401  (importing it registers the fixes with yt-dlp)
 from .models import DownloadRequest, JobResult, JobState, MediaInfo, Progress
 from .options import build_options
 

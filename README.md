@@ -109,6 +109,7 @@ universal_downloader/
     options.py   DownloadRequest -> yt-dlp options (format selection)
     engine.py    DownloadJob (pause/resume/cancel), fetch_info, find_ffmpeg
     plugins.py   plugin catalog, installer and yt-dlp loading
+    site_fixes.py  stopgap fixes for sites broken in current yt-dlp
   ui/        Qt interface
     main_window.py, queue_item.py, plugins_dialog.py, theme.py, ...
 packaging/   PyInstaller build script

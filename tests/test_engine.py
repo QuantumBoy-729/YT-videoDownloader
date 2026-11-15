@@ -9,7 +9,7 @@ import time
 import pytest
 
 from universal_downloader.core import DownloadJob, DownloadRequest, JobState, fetch_info
-from universal_downloader.core.engine import clean_error
+from universal_downloader.core.engine import clean_error, describe_error
 
 from .conftest import NO_PROXY
 
@@ -172,3 +172,31 @@ def test_clean_error():
     )
     assert clean_error(raw) == "[youtube] abc: Video unavailable"
     assert clean_error("") == "Unknown error"
+
+
+def test_broken_site_support_is_explained(server, tmp_path, monkeypatch):
+    """A crash inside yt-dlp's site code must not surface as a bare Python error."""
+    import yt_dlp
+
+    def crash(self, *args, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'items'")
+
+    monkeypatch.setattr(yt_dlp.YoutubeDL, "extract_info", crash)
+
+    with pytest.raises(RuntimeError) as exc:
+        fetch_info(f"{server}/clip.mp4", extra_opts=NO_PROXY)
+    assert "looks out of date" in str(exc.value)
+    assert "Updating yt-dlp" in str(exc.value)
+
+    job, _, _ = make_job(f"{server}/clip.mp4", tmp_path)
+    result = job.run()
+    assert result.state is JobState.FAILED
+    assert "looks out of date" in result.error
+    assert "AttributeError" in result.error
+
+
+def test_ordinary_errors_keep_their_own_message():
+    from yt_dlp.utils import DownloadError
+
+    assert describe_error(DownloadError("ERROR: Video unavailable")) == "Video unavailable"
+    assert describe_error(PermissionError(13, "Permission denied")) == "[Errno 13] Permission denied"

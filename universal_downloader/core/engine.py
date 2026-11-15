@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
-from yt_dlp.utils import DownloadCancelled
+from yt_dlp.utils import DownloadCancelled, YoutubeDLError
 
 from .models import DownloadRequest, JobResult, JobState, MediaInfo, Progress
 from .options import build_options
@@ -58,6 +58,20 @@ def clean_error(message: str) -> str:
     message = re.split(r";?\s*please report this issue", message, maxsplit=1)[0]
     message = re.sub(r"\s*\(caused by .*\)\s*$", "", message)
     return message.strip() or "Unknown error"
+
+
+def describe_error(exc: BaseException) -> str:
+    """Explain a failed lookup or download in terms a user can act on."""
+    if isinstance(exc, (YoutubeDLError, OSError)):
+        return clean_error(str(exc) or repr(exc))
+    # Anything else is yt-dlp's site-specific code tripping over a page it no
+    # longer understands (an AttributeError, KeyError, ...), which says nothing
+    # useful on its own.
+    return (
+        "Support for this site looks out of date in the installed yt-dlp, so the "
+        "link could not be read. Updating yt-dlp may fix it. "
+        f"(Details: {type(exc).__name__}: {exc})"
+    )
 
 
 def find_ffmpeg() -> str | None:
@@ -114,7 +128,7 @@ def fetch_info(url: str, extra_opts: dict[str, Any] | None = None) -> MediaInfo:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # DownloadError, but also e.g. unsupported URL schemes.
-        raise RuntimeError(clean_error(str(exc) or repr(exc))) from exc
+        raise RuntimeError(describe_error(exc)) from exc
     if not info:
         raise RuntimeError("No media found at this URL")
 
@@ -233,7 +247,7 @@ class DownloadJob:
             if self._cancelled.is_set():
                 self._remove_temp_files()
                 return self._finish(JobState.CANCELLED)
-            return self._finish(JobState.FAILED, error=clean_error(str(exc) or repr(exc)))
+            return self._finish(JobState.FAILED, error=describe_error(exc))
 
     # -- internals -------------------------------------------------------------
 

@@ -486,3 +486,95 @@ def test_duplicate_repo_names_get_separate_rows(app, browser):
     browser.browse_found_button.click()
     assert pump(app, lambda: len(browser._found_rows) == 2)
     assert browser.found_layout.count() == 2
+
+
+# -- switching plugin steps on and off -------------------------------------------------
+
+
+def install_ui_marker(app, dialog):
+    dialog.row("ui-marker").button.click()
+    assert pump(app, lambda: "ui-marker" in dialog._step_settings and dialog.row("ui-marker").installed)
+    return dialog._step_settings["ui-marker"]
+
+
+def test_recommended_steps_start_on_with_their_options(app, window, dialog):
+    settings = install_ui_marker(app, dialog)
+    assert settings._checks["UiMarker"].isChecked()
+    assert settings._options["UiMarker"].text() == "text=hello"
+    assert settings._whens["UiMarker"].currentData() == "post_process"
+    assert window.plugins.postprocessors() == [{"key": "UiMarker", "when": "post_process", "text": "hello"}]
+
+
+def test_switching_a_step_off_and_on(app, window, dialog):
+    settings = install_ui_marker(app, dialog)
+    settings._checks["UiMarker"].setChecked(False)
+    assert window.plugins.postprocessors() == []
+    settings._checks["UiMarker"].setChecked(True)
+    assert len(window.plugins.postprocessors()) == 1
+
+
+def test_changing_when_a_step_runs_and_its_options(app, window, dialog):
+    settings = install_ui_marker(app, dialog)
+    combo = settings._whens["UiMarker"]
+    combo.setCurrentIndex(combo.findData("after_move"))
+    combo.activated.emit(combo.currentIndex())
+    field = settings._options["UiMarker"]
+    field.setText("text=changed; extra = 1")
+    field.editingFinished.emit()
+    assert window.plugins.postprocessors() == [
+        {"key": "UiMarker", "when": "after_move", "text": "changed", "extra": "1"}
+    ]
+    assert settings._errors["UiMarker"].isHidden()
+
+
+def test_unreadable_options_show_a_message_and_change_nothing(app, window, dialog):
+    settings = install_ui_marker(app, dialog)
+    field = settings._options["UiMarker"]
+    field.setText("this is not an option")
+    field.editingFinished.emit()
+    assert not settings._errors["UiMarker"].isHidden()
+    assert "name=value" in settings._errors["UiMarker"].text()
+    assert window.plugins.postprocessors()[0]["text"] == "hello"
+
+    field.setText("text=fixed")
+    field.editingFinished.emit()
+    assert settings._errors["UiMarker"].isHidden()
+    assert window.plugins.postprocessors()[0]["text"] == "fixed"
+
+
+def test_settings_are_restored_when_the_dialog_reopens(app, window, dialog):
+    settings = install_ui_marker(app, dialog)
+    settings._checks["UiMarker"].setChecked(False)
+    settings._options["UiMarker"].setText("text=later")
+    settings._options["UiMarker"].editingFinished.emit()
+
+    dialog.reload()
+    again = dialog._step_settings["ui-marker"]
+    assert not again._checks["UiMarker"].isChecked()
+    assert again._options["UiMarker"].text() == "text=later"
+
+
+def test_a_custom_plugin_step_starts_off_and_is_offered(app, window, dialog, tmp_path):
+    archive = tmp_path / "Custom-Step.zip"
+    archive.write_bytes(pp_zip("UiCustomStep"))
+    dialog.source_edit.setText(str(archive))
+    dialog.custom_button.click()
+    assert pump(app, lambda: "custom-step" in dialog._step_settings)
+    settings = dialog._step_settings["custom-step"]
+    assert not settings._checks["UiCustomStep"].isChecked()
+    assert window.plugins.postprocessors() == []
+    settings._checks["UiCustomStep"].setChecked(True)
+    assert window.plugins.postprocessors() == [{"key": "UiCustomStep", "when": "post_process"}]
+
+
+def test_a_switched_on_step_takes_part_in_downloads_from_the_window(app, window, dialog, server, tmp_path):
+    settings = install_ui_marker(app, dialog)
+    settings._options["UiMarker"].setText("text=from the dialog")
+    settings._options["UiMarker"].editingFinished.emit()
+
+    window.url_edit.setText(f"{server}/clip.mp4")
+    item = window.enqueue()
+    assert pump(app, lambda: item.result is not None)
+    assert item.state is JobState.DONE, item.result.error
+    marker = next((tmp_path / "out").glob("*.UiMarker"))
+    assert marker.read_text() == "from the dialog"

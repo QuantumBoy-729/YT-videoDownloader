@@ -14,6 +14,7 @@ Plugins are third-party code and run with the app's permissions.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import io
 import json
@@ -27,6 +28,8 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from yt_dlp.utils import POSTPROCESS_WHEN
 
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 MAX_UNPACKED_BYTES = 25 * 1024 * 1024
@@ -43,7 +46,86 @@ _NOT_OWNERS = {"topics", "orgs", "settings", "marketplace", "sponsors", "feature
 
 
 class PluginError(Exception):
-    """A plugin could not be installed; the message is safe to show a user."""
+    """A plugin could not be installed or set up; the message is safe to show a user."""
+
+
+#: When a processing step runs, with a plain description for each yt-dlp stage.
+WHEN_LABELS: dict[str, str] = {
+    "post_process": "After each download finishes",
+    "after_move": "After the file is moved to its folder",
+    "before_dl": "Before each download starts",
+    "pre_process": "Right after the video is looked up",
+    "after_filter": "After the video passes your filters",
+    "video": "After the quality is chosen",
+    "after_video": "After all formats of a video are done",
+    "playlist": "At the end of a playlist",
+}
+assert set(WHEN_LABELS) == set(POSTPROCESS_WHEN), "yt-dlp changed its processing stages"
+DEFAULT_WHEN = "post_process"
+_OPTION_NAME = re.compile(r"[A-Za-z_]\w*")
+
+
+def parse_options(text: str) -> dict[str, str]:
+    """Read ``name=value; name=value`` (yt-dlp's own style) into a dict."""
+    options: dict[str, str] = {}
+    for part in text.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        name, separator, value = part.partition("=")
+        name = name.strip()
+        if not separator or not _OPTION_NAME.fullmatch(name) or name in ("key", "when"):
+            raise PluginError(
+                f'Could not read "{part}". Write options as name=value, separated by semicolons.'
+            )
+        options[name] = value.strip()
+    return options
+
+
+def format_options(options: dict[str, str]) -> str:
+    return "; ".join(f"{name}={value}" for name, value in options.items())
+
+
+def _clean_step(raw: Any) -> dict[str, Any]:
+    """Normalise one stored processing-step setting."""
+    raw = raw if isinstance(raw, dict) else {}
+    when = raw.get("when")
+    options = raw.get("options")
+    return {
+        "enabled": bool(raw.get("enabled")),
+        "when": when if when in POSTPROCESS_WHEN else DEFAULT_WHEN,
+        "options": {str(k): str(v) for k, v in options.items()} if isinstance(options, dict) else {},
+    }
+
+
+def _step_from_entry(entry: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Turn a yt-dlp postprocessor entry into a stored, enabled step setting."""
+    options = {str(k): str(v) for k, v in entry.items() if k not in ("key", "when")}
+    return str(entry["key"]), _clean_step({"enabled": True, "when": entry.get("when"), "options": options})
+
+
+def find_postprocessor_keys(folder: Path) -> list[str]:
+    """Names of the processing steps a plugin provides, found without running it.
+
+    yt-dlp loads a step from every class named ``<Key>PP`` under the plugin's
+    ``postprocessor`` package, and refers to it as ``<Key>``.
+    """
+    keys: list[str] = []
+    for path in sorted((folder / _PACKAGE / "postprocessor").rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (SyntaxError, ValueError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ClassDef)
+                and node.name.endswith("PP")
+                and len(node.name) > 2
+                and not node.name.startswith("_")
+                and node.name[:-2] not in keys
+            ):
+                keys.append(node.name[:-2])
+    return keys
 
 
 @dataclass(frozen=True)
@@ -122,6 +204,10 @@ class InstalledPlugin:
     postprocessors: tuple[dict[str, Any], ...] = ()
     #: What the plugin adds: "extractor" (sites / YouTube features) and/or "postprocessor".
     kinds: tuple[str, ...] = ()
+    #: Processing steps the plugin provides, and the user's settings for each:
+    #: ``{"enabled": bool, "when": stage, "options": {name: value}}``.
+    pp_keys: tuple[str, ...] = ()
+    pp_config: dict[str, dict[str, Any]] = field(default_factory=dict, compare=False)
     path: Path = field(default=Path(), compare=False)
 
 
@@ -244,21 +330,37 @@ class PluginManager:
             return plugins
         for folder in sorted(self.root.iterdir()):
             try:
-                meta = json.loads((folder / "plugin.json").read_text(encoding="utf-8"))
-                plugins.append(
-                    InstalledPlugin(
-                        id=folder.name,
-                        name=str(meta["name"]),
-                        source=str(meta.get("source", "")),
-                        revision=str(meta.get("revision", "")),
-                        postprocessors=tuple(dict(p) for p in meta.get("postprocessors", [])),
-                        kinds=tuple(str(k) for k in meta.get("kinds", [])),
-                        path=folder,
-                    )
-                )
+                plugins.append(self._load(folder))
             except (OSError, ValueError, KeyError, TypeError):
                 continue  # Not one of ours, or damaged: ignore it.
         return plugins
+
+    @staticmethod
+    def _load(folder: Path) -> InstalledPlugin:
+        meta = json.loads((folder / "plugin.json").read_text(encoding="utf-8"))
+        config = {str(k): _clean_step(v) for k, v in (meta.get("pp_config") or {}).items()}
+        if not config:
+            # Older installs stored the enabled entries directly.
+            config = dict(_step_from_entry(e) for e in meta.get("postprocessors", []))
+        keys = list(dict.fromkeys([*map(str, meta.get("pp_keys", [])), *config]))
+        for key in keys:
+            config.setdefault(key, _clean_step({}))
+        entries = tuple(
+            {"key": key, "when": config[key]["when"], **config[key]["options"]}
+            for key in keys
+            if config[key]["enabled"]
+        )
+        return InstalledPlugin(
+            id=folder.name,
+            name=str(meta["name"]),
+            source=str(meta.get("source", "")),
+            revision=str(meta.get("revision", "")),
+            postprocessors=entries,
+            kinds=tuple(str(k) for k in meta.get("kinds", [])),
+            pp_keys=tuple(keys),
+            pp_config=config,
+            path=folder,
+        )
 
     def is_installed(self, plugin_id: str) -> bool:
         return any(p.id == plugin_id for p in self.installed())
@@ -303,6 +405,43 @@ class PluginManager:
                 if not plugin.postprocessors:
                     self.needs_restart = True
 
+    def configure_postprocessor(
+        self,
+        plugin_id: str,
+        key: str,
+        *,
+        enabled: bool | None = None,
+        when: str | None = None,
+        options: dict[str, str] | None = None,
+    ) -> None:
+        """Switch a plugin's processing step on or off, or change when it runs and its options."""
+        plugin = next((p for p in self.installed() if p.id == plugin_id), None)
+        if plugin is None or key not in plugin.pp_keys:
+            raise PluginError("That plugin step is not installed.")
+        if when is not None and when not in POSTPROCESS_WHEN:
+            raise PluginError("That is not a valid time for the step to run.")
+        for name in options or {}:
+            if not _OPTION_NAME.fullmatch(name) or name in ("key", "when"):
+                raise PluginError(f'"{name}" is not a valid option name.')
+
+        step = dict(plugin.pp_config[key])
+        if enabled is not None:
+            step["enabled"] = enabled
+        if when is not None:
+            step["when"] = when
+        if options is not None:
+            step["options"] = dict(options)
+        config = {**plugin.pp_config, key: _clean_step(step)}
+
+        meta_path = plugin.path / "plugin.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["pp_keys"] = list(plugin.pp_keys)
+        meta["pp_config"] = config
+        meta.pop("postprocessors", None)
+        temporary = meta_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        os.replace(temporary, meta_path)
+
     def _install(self, plugin_id, name, source, revision, postprocessors) -> InstalledPlugin:
         data = self._read(source)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -313,12 +452,17 @@ class PluginManager:
                 # GitHub names the folder <owner>-<repo>-<commit>, which pins what we got.
                 found = re.search(r"-([0-9a-f]{7,40})$", top_folder)
                 revision = found.group(1) if found else ""
+            # Steps a catalog entry recommends start switched on; anything else
+            # the plugin provides starts off until the user turns it on.
+            config = dict(_step_from_entry(e) for e in postprocessors)
+            keys = list(dict.fromkeys([*find_postprocessor_keys(staging), *config]))
             meta = {
                 "name": name,
                 "source": source,
                 "revision": revision,
                 "kinds": kinds,
-                "postprocessors": list(postprocessors),
+                "pp_keys": keys,
+                "pp_config": {key: config.get(key, _clean_step({})) for key in keys},
             }
             (staging / "plugin.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
             target = self.root / plugin_id
@@ -329,9 +473,7 @@ class PluginManager:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         self.activate()
-        return InstalledPlugin(
-            plugin_id, name, source, revision, tuple(postprocessors), tuple(kinds), target
-        )
+        return self._load(target)
 
     def _read(self, source: str) -> bytes:
         if re.match(r"https?://", source, flags=re.I):

@@ -8,9 +8,12 @@ from typing import Callable, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,7 +25,17 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.discovery import RepoInfo, search_topic
-from ..core.plugins import CATALOG, CatalogEntry, InstalledPlugin, PluginManager, slug
+from ..core.plugins import (
+    CATALOG,
+    WHEN_LABELS,
+    CatalogEntry,
+    InstalledPlugin,
+    PluginError,
+    PluginManager,
+    format_options,
+    parse_options,
+    slug,
+)
 from .theme import Theme
 
 _INTRO = (
@@ -37,10 +50,84 @@ _FOUND_HINT = (
 )
 _MAX_FOUND_ROWS = 40
 _CUSTOM_HINT = (
-    "Any other yt-dlp plugin can be installed from its zip archive. Plugins that "
-    "add support for more sites work straight away; other kinds may need options "
-    "this app does not set."
+    "Any other yt-dlp plugin can be installed from its zip archive or GitHub page. "
+    "Plugins that add site support work straight away. Plugins that add a "
+    "processing step get a switch and options in the list above."
 )
+
+
+class PostprocessorSettings(QWidget):
+    """Switch, timing and options for each processing step a plugin provides."""
+
+    #: step name, switched on, stage, options text
+    changed = Signal(str, bool, str, str)
+
+    def __init__(self, plugin: InstalledPlugin, parent=None) -> None:
+        super().__init__(parent)
+        self._errors: dict[str, QLabel] = {}
+        self._checks: dict[str, QCheckBox] = {}
+        self._whens: dict[str, QComboBox] = {}
+        self._options: dict[str, QLineEdit] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 6, 0, 0)
+        layout.setSpacing(8)
+        for key in plugin.pp_keys:
+            step = plugin.pp_config[key]
+            check = QCheckBox(f"Use {key} on new downloads")
+            check.setChecked(step["enabled"])
+            when = QComboBox()
+            when.setAccessibleName(f"When {key} runs")
+            for stage, label in WHEN_LABELS.items():
+                when.addItem(label, stage)
+            when.setCurrentIndex(max(0, when.findData(step["when"])))
+            options = QLineEdit(format_options(step["options"]))
+            options.setPlaceholderText("name=value; name=value  (optional)")
+            options.setAccessibleName(f"Options for {key}")
+            error = QLabel()
+            error.setObjectName("error")
+            error.setWordWrap(True)
+            error.setTextFormat(Qt.TextFormat.PlainText)
+            error.setVisible(False)
+            self._checks[key], self._whens[key] = check, when
+            self._options[key], self._errors[key] = options, error
+
+            def emit(*_args, key=key) -> None:
+                self.changed.emit(
+                    key,
+                    self._checks[key].isChecked(),
+                    self._whens[key].currentData(),
+                    self._options[key].text(),
+                )
+
+            check.toggled.connect(emit)
+            when.activated.connect(emit)
+            options.editingFinished.connect(emit)
+
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(10)
+            grid.setVerticalSpacing(6)
+            grid.setColumnStretch(1, 1)
+            runs = QLabel("Runs")
+            runs.setObjectName("muted")
+            opts = QLabel("Options")
+            opts.setObjectName("muted")
+            grid.addWidget(runs, 0, 0)
+            grid.addWidget(when, 0, 1)
+            grid.addWidget(opts, 1, 0)
+            grid.addWidget(options, 1, 1)
+            layout.addWidget(check)
+            layout.addLayout(grid)
+            layout.addWidget(error)
+        note = QLabel("Changes apply to downloads you start afterwards.")
+        note.setObjectName("muted")
+        layout.addWidget(note)
+
+    def set_error(self, key: str, message: str) -> None:
+        label = self._errors.get(key)
+        if label is not None:
+            label.setText(message)
+            label.setVisible(bool(message))
 
 
 class PluginRow(QFrame):
@@ -84,6 +171,7 @@ class PluginRow(QFrame):
         self.details_label.setWordWrap(True)
 
         text = QVBoxLayout()
+        self._text_layout = text
         text.setSpacing(4)
         text.addLayout(title)
         text.addWidget(self.details_label)
@@ -117,6 +205,10 @@ class PluginRow(QFrame):
     @property
     def installed(self) -> bool:
         return self._installed
+
+    def add_widget(self, widget: QWidget) -> None:
+        """Add ``widget`` below the description (above any error message)."""
+        self._text_layout.insertWidget(self._text_layout.count() - 1, widget)
 
     def set_installed(self, installed: bool) -> None:
         self._installed = installed
@@ -171,6 +263,7 @@ class PluginsDialog(QDialog):
         self._catalog = tuple(catalog)
         self._confirm = confirm or self._ask
         self._rows: dict[str, PluginRow] = {}
+        self._step_settings: dict[str, PostprocessorSettings] = {}
         self._found_rows: dict[str, PluginRow] = {}
         self._found: list[RepoInfo] | None = None
         self._discover = discover or (lambda: search_topic(self.manager.opener))
@@ -299,14 +392,18 @@ class PluginsDialog(QDialog):
             self.rows_layout.removeWidget(row)
             row.deleteLater()
         self._rows.clear()
+        self._step_settings.clear()
 
         installed = {p.id: p for p in self.manager.installed()}
         for entry in self._catalog:
             self._add_row(self._catalog_row(entry), entry.id in installed)
+            if entry.id in installed:
+                self._attach_settings(installed[entry.id])
         catalog_ids = {e.id for e in self._catalog}
         for plugin in installed.values():
             if plugin.id not in catalog_ids:
                 self._add_row(self._custom_row(plugin), True)
+                self._attach_settings(plugin)
         self.restart_label.setVisible(self.manager.needs_restart)
         self._refresh_custom()
         self._render_found()
@@ -317,6 +414,27 @@ class PluginsDialog(QDialog):
         row.removeRequested.connect(self.remove)
         self._rows[row.plugin_id] = row
         self.rows_layout.addWidget(row)
+
+    def _attach_settings(self, plugin: InstalledPlugin) -> None:
+        if not plugin.pp_keys:
+            return
+        settings = PostprocessorSettings(plugin)
+        settings.changed.connect(lambda key, on, when, text, pid=plugin.id: self._configure(pid, key, on, when, text))
+        self._step_settings[plugin.id] = settings
+        self._rows[plugin.id].add_widget(settings)
+
+    def _configure(self, plugin_id: str, key: str, enabled: bool, when: str, options_text: str) -> None:
+        """Save a change made in a plugin's step settings."""
+        settings = self._step_settings.get(plugin_id)
+        try:
+            self.manager.configure_postprocessor(
+                plugin_id, key, enabled=enabled, when=when, options=parse_options(options_text)
+            )
+            message = ""
+        except PluginError as exc:
+            message = str(exc)
+        if settings is not None:
+            settings.set_error(key, message)
 
     @staticmethod
     def _catalog_row(entry: CatalogEntry) -> PluginRow:
@@ -334,8 +452,8 @@ class PluginsDialog(QDialog):
             notes.append("Adds support for more sites or YouTube features; works on its own.")
         if "postprocessor" in plugin.kinds:
             notes.append(
-                "Adds a processing step that needs its own settings, so it is installed "
-                "but not switched on."
+                "Adds a processing step. It starts switched off; turn it on below, and "
+                "check the plugin's page for the options it accepts."
             )
         if plugin.revision:
             notes.append(f"Version {plugin.revision[:10]}.")

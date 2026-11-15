@@ -85,9 +85,15 @@ What to expect once installed:
 
 - **Plugins that add site support or YouTube features** work as soon as they are
   installed.
-- **Post-processing plugins** outside the built-in list are installed but not
-  switched on, because each one needs its own settings. They are labelled as
-  such in the list.
+- **Post-processing plugins** (steps that run on each download, such as setting
+  file dates, fixing titles or applying ReplayGain) get controls in the list:
+  a checkbox to use the step, a choice of when it runs, and an options box
+  (`name=value; name=value`, the same way yt-dlp's command line takes them; see
+  the plugin's page for what it accepts). Steps on the built-in list start
+  switched on; steps from anywhere else start off until you turn them on. Your
+  choices are remembered and apply to downloads you start afterwards. If a step
+  cannot be loaded or rejects its options, the download fails with a message
+  naming the step instead of silently skipping it.
 - **Plugins that need extra Python packages or programs** may not load, since the
   app cannot install packages for them.
 

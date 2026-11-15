@@ -75,6 +75,20 @@ def describe_error(exc: BaseException) -> str:
     )
 
 
+def plugin_step_error(exc: BaseException) -> str:
+    """Explain a failure to set up a plugin's processing step."""
+    if isinstance(exc, KeyError) and str(exc).strip("'\"").endswith("PP"):
+        name = str(exc).strip("'\"")[:-2]
+        return (
+            f'The plugin step "{name}" could not be loaded. It may need extra software, '
+            "or not work with this version. Switch it off under Plugins to download without it."
+        )
+    return (
+        f"A plugin's processing step could not be set up ({exc}). "
+        "Check its options, or switch it off, under Plugins."
+    )
+
+
 def find_ffmpeg() -> str | None:
     """Locate an ffmpeg binary: next to the app, on PATH, or from imageio-ffmpeg."""
     name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
@@ -230,7 +244,13 @@ class DownloadJob:
 
         try:
             self.request.output_dir.mkdir(parents=True, exist_ok=True)
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                ydl = yt_dlp.YoutubeDL(opts)
+            except Exception as exc:
+                if not self._plugin_postprocessors:
+                    raise
+                return self._finish(JobState.FAILED, error=plugin_step_error(exc))
+            with ydl:
                 info = ydl.extract_info(self.request.url, download=True)
             files = self._collect_files(info)
             if self._cancelled.is_set():

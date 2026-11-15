@@ -1,135 +1,105 @@
-# YouTube Downloader with Download Controls
+# YT Downloader
 
-A professional YouTube downloader application with **pause/resume/stop** functionality and a modern graphical interface built using Python and Tkinter.
+A desktop app for saving videos and audio from YouTube and the
+[many other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
+supported by yt-dlp. Built with Python, Qt (PySide6) and yt-dlp.
 
-## 🚀 **READY TO USE - Single File Executable Available!**
+## Features
 
-**Download the ready-to-use executable:** [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe) (21.3 MB)
-- ✅ **Zero dependencies** - No Python installation required
-- ✅ **Copy & Run** - Works on any Windows machine
-- ✅ **Complete features** - All download controls included
+- **Real quality selection** - paste a link and pick from the resolutions that
+  video actually has, up to 4K. Video and audio streams are downloaded
+  separately and merged, so 720p/1080p/4K work (not just the 360p combined file).
+- **Video or audio** - MP4, MKV or WebM video; MP3, M4A or Opus audio.
+- **Download queue** - queue as many links as you like; two run at a time, each
+  with its own progress, speed and time remaining.
+- **Pause, resume, cancel, retry** - per download. Cancelling removes the
+  partial file.
+- **Playlists** - download a whole playlist, or just the one video from a
+  playlist link.
+- **Light and dark themes**, drag-and-drop links, and your folder/format/quality
+  choices remembered between runs.
+- **No ffmpeg setup** - an ffmpeg binary is installed with the app. A system
+  ffmpeg on `PATH` is used instead if you have one.
 
-## 🎯 Enhanced Features
+## Install and run
 
-- **🎮 Download Controls**: Pause, Resume, and Stop downloads mid-process
-- **📊 Real-time Progress**: Live progress bars and status updates
-- **🎯 Smart State Management**: Intelligent button enabling/disabling
-- **🖥️ Easy-to-use GUI**: Clean and intuitive interface with modern controls
-- **📺 Multiple formats**: Download videos in MP4, WebM, or extract audio as MP3
-- **🎬 Quality selection**: Choose from various quality options (144p to 1080p or best available)
-- **📁 Custom download location**: Select where to save your downloads
-- **⚡ Real-time feedback**: See download progress and logs in real-time
-- **🔧 Automatic dependency management**: Automatically installs yt-dlp if not present
-- **📦 Professional distribution**: Both MSI installer and single-file executable
+Requires Python 3.10 or newer.
 
-## 🚀 Quick Start Options
-
-### Option 1: Ready-to-Use Executable (Recommended)
-1. **Download**: [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe) (21.3 MB)
-2. **Run**: Double-click the executable - that's it!
-3. **No installation required** - works on any Windows machine
-
-### Option 2: Run from Source
-**Requirements:**
-- Python 3.6 or higher
-- Internet connection
-
-**Installation:**
-1. **Install Python**: Download from [python.org](https://www.python.org/downloads/)
-2. **Clone this repository**:
-   ```bash
-   git clone https://github.com/QuantumBoy-729/YT-videoDownloader.git
-   cd YT-videoDownloader
-   ```
-3. **Install dependencies** (optional - auto-installed):
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## 🎮 Usage
-
-### Using the Executable
-1. **Download** the [`YouTubeDownloader-Single.exe`](./YouTubeDownloader-Single.exe)
-2. **Double-click** to launch the application
-3. **Enter** a YouTube URL and start downloading!
-
-### Running from Source
-1. **Run the application**:
-   ```bash
-   python youtube_downloader.py
-   ```
-
-2. **Using the interface**:
-   - Paste a YouTube URL in the "YouTube URL" field
-   - Select your preferred format (MP4, MP3, WebM)
-   - Choose video quality (144p to 1080p, or "best" for highest available)
-   - Select download location or use the default Downloads folder
-   - Click "Download" to start the download
-
-3. **Monitor progress**:
-   - Watch the status updates in the status bar
-   - View detailed logs in the log area at the bottom
-   - The progress bar shows download activity
-
-## Building the Installer
-
-To build the MSI installer:
-
-```powershell
-.\build_final.ps1 -Version 1.0.0
+```bash
+git clone https://github.com/QuantumBoy-729/YT-videoDownloader.git
+cd YT-videoDownloader
+pip install .
+yt-downloader
 ```
 
-This will create:
-- `dist\YouTubeDownloader.exe` - Standalone executable
-- `YouTubeDownloader-1.0.0.msi` - Professional Windows installer
+Or run it straight from the checkout:
 
-## Supported URLs
+```bash
+pip install yt-dlp PySide6-Essentials imageio-ffmpeg
+python -m yt_downloader
+```
 
-The app supports:
-- Individual YouTube videos
-- YouTube Shorts
-- Most YouTube video formats
+Sites change often and old yt-dlp versions stop working. If downloads start
+failing, update it first:
 
-## File Naming
+```bash
+pip install -U yt-dlp
+```
 
-Downloaded files are automatically named using the video title and appropriate file extension.
+## Windows executable
 
-## Troubleshooting
+A single-file `YTDownloader.exe` (no Python needed) is built by GitHub Actions:
+download it from the latest run's artifacts, or from the release page for
+tagged versions (`v*`). To build it yourself:
 
-### Python not found
-If you get "Python was not found" error:
-1. Install Python from [python.org](https://www.python.org/downloads/)
-2. Make sure to check "Add Python to PATH" during installation
-3. Restart your command prompt/terminal
+```bash
+pip install ".[build]"
+python packaging/build.py
+```
 
-### yt-dlp installation fails
-If automatic yt-dlp installation fails:
-1. Open command prompt as administrator
-2. Run: `pip install yt-dlp`
-3. Restart the application
+The result is written to `dist/`. The same script produces a native binary on
+Linux and macOS.
 
-### Download fails
-- Check your internet connection
-- Verify the YouTube URL is correct and accessible
-- Some videos may be geo-restricted or have download limitations
-- Check the log area for detailed error messages
+## Development
 
-## Legal Notice
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
-This tool is for personal use only. Please respect YouTube's Terms of Service and copyright laws. Only download content that you have permission to download.
+The tests need ffmpeg but no internet: they serve generated clips from a local
+HTTP server and drive both the download engine and the real window (offscreen).
 
-## Technical Details
+```
+yt_downloader/
+  core/      download engine - no GUI imports, usable on its own
+    options.py   DownloadRequest -> yt-dlp options (format selection)
+    engine.py    DownloadJob (pause/resume/cancel), fetch_info, find_ffmpeg
+  ui/        Qt interface
+    main_window.py, queue_item.py, theme.py, ...
+packaging/   PyInstaller build script
+tests/
+```
 
-- **Backend**: yt-dlp (modern fork of youtube-dl)
-- **GUI**: Python Tkinter
-- **Threading**: Uses separate threads for downloads to keep UI responsive
-- **Cross-platform**: Works on Windows, macOS, and Linux
-- **Build tools**: PyInstaller for EXE, WiX for MSI installer
+Using the engine without the GUI:
 
-## Contributing
+```python
+from pathlib import Path
+from yt_downloader.core import DownloadJob, DownloadRequest
 
-Feel free to submit issues, feature requests, or pull requests to improve this application.
+job = DownloadJob(
+    DownloadRequest(url="https://...", output_dir=Path("videos"), max_height=1080),
+    on_progress=lambda p: print(p.stage, p.fraction),
+)
+result = job.run()  # blocks; job.pause() / resume() / cancel() from another thread
+print(result.state, result.files, result.error)
+```
+
+## Legal
+
+For personal use. Only download content you have the right to download, and
+respect the terms of service of the sites you use.
 
 ## License
 
-This project is open source. Please check the license file for details.
+See [LICENSE](LICENSE).

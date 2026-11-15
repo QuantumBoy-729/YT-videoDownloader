@@ -24,7 +24,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -307,9 +307,3 @@ class PluginManager:
         importlib.invalidate_caches()
         load_all_plugins()
 
-
-def describe(plugin: InstalledPlugin | CatalogEntry) -> dict[str, Any]:
-    """Plain-dict view, handy for logging and tests."""
-    data = asdict(plugin)
-    data.pop("path", None)
-    return data

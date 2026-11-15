@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
-from yt_dlp.utils import DownloadCancelled, DownloadError
+from yt_dlp.utils import DownloadCancelled
 
 from .models import DownloadRequest, JobResult, JobState, MediaInfo, Progress
 from .options import build_options

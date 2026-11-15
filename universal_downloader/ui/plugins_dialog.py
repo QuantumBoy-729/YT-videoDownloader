@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.plugins import CATALOG, CatalogEntry, InstalledPlugin, PluginManager
+from ..core.discovery import RepoInfo, search_topic
+from ..core.plugins import CATALOG, CatalogEntry, InstalledPlugin, PluginManager, slug
 from .theme import Theme
 
 _INTRO = (
@@ -29,6 +30,12 @@ _INTRO = (
     "people and run with the same access to your computer as this app, so only "
     "install ones you trust."
 )
+_FOUND_HINT = (
+    "Everything tagged yt-dlp-plugins on GitHub. None of it has been reviewed, and "
+    "many are for other tools or need extra software, so some will not work here. "
+    "Plugins that add site support are the ones most likely to."
+)
+_MAX_FOUND_ROWS = 40
 _CUSTOM_HINT = (
     "Any other yt-dlp plugin can be installed from its zip archive. Plugins that "
     "add support for more sites work straight away; other kinds may need options "
@@ -49,7 +56,7 @@ class PluginRow(QFrame):
         details: str,
         description: str = "",
         note: str = "",
-        entry: CatalogEntry | None = None,
+        entry: object | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -147,6 +154,8 @@ class PluginRow(QFrame):
 class PluginsDialog(QDialog):
     # (plugin id, InstalledPlugin on success or an error message)
     _installFinished = Signal(str, object)
+    # list[RepoInfo] on success, an error message otherwise
+    _discovered = Signal(object)
 
     def __init__(
         self,
@@ -155,12 +164,17 @@ class PluginsDialog(QDialog):
         parent=None,
         catalog: Sequence[CatalogEntry] = CATALOG,
         confirm: Callable[[str], bool] | None = None,
+        discover: Callable[[], Sequence[RepoInfo]] | None = None,
     ) -> None:
         super().__init__(parent)
         self.manager = manager
         self._catalog = tuple(catalog)
         self._confirm = confirm or self._ask
         self._rows: dict[str, PluginRow] = {}
+        self._found_rows: dict[str, PluginRow] = {}
+        self._found: list[RepoInfo] | None = None
+        self._discover = discover or (lambda: search_topic(self.manager.opener))
+        self._discovering = False
         self._custom_busy = False
 
         self.setWindowTitle("Plugins")
@@ -181,10 +195,45 @@ class PluginsDialog(QDialog):
 
         body = QWidget()
         body.setObjectName("queueBody")
-        self.rows_layout = QVBoxLayout(body)
-        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(8)
+        self.rows_layout = QVBoxLayout()
         self.rows_layout.setSpacing(8)
-        self.rows_layout.addStretch(1)
+        body_layout.addLayout(self.rows_layout)
+
+        found_title = QLabel("More from GitHub")
+        found_title.setObjectName("sectionTitle")
+        found_hint = QLabel(_FOUND_HINT)
+        found_hint.setObjectName("muted")
+        found_hint.setWordWrap(True)
+        self.browse_found_button = QPushButton("Browse plugins on GitHub")
+        self.browse_found_button.setMinimumHeight(38)
+        self.browse_found_button.clicked.connect(self.discover)
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Filter by name or description")
+        self.filter_edit.setAccessibleName("Filter plugins")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.setVisible(False)
+        self.filter_edit.textChanged.connect(self._render_found)
+        found_row = QHBoxLayout()
+        found_row.setSpacing(8)
+        found_row.addWidget(self.browse_found_button)
+        found_row.addWidget(self.filter_edit, 1)
+        self.found_status = QLabel()
+        self.found_status.setObjectName("muted")
+        self.found_status.setWordWrap(True)
+        self.found_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.found_status.setVisible(False)
+        self.found_layout = QVBoxLayout()
+        self.found_layout.setSpacing(8)
+        body_layout.addSpacing(10)
+        body_layout.addWidget(found_title)
+        body_layout.addWidget(found_hint)
+        body_layout.addLayout(found_row)
+        body_layout.addWidget(self.found_status)
+        body_layout.addLayout(self.found_layout)
+        body_layout.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -236,6 +285,7 @@ class PluginsDialog(QDialog):
         layout.addLayout(footer)
 
         self._installFinished.connect(self._on_install_finished)
+        self._discovered.connect(self._on_discovered)
         self.reload()
 
     # -- rows ------------------------------------------------------------------
@@ -259,13 +309,14 @@ class PluginsDialog(QDialog):
                 self._add_row(self._custom_row(plugin), True)
         self.restart_label.setVisible(self.manager.needs_restart)
         self._refresh_custom()
+        self._render_found()
 
     def _add_row(self, row: PluginRow, installed: bool) -> None:
         row.set_installed(installed)
         row.installRequested.connect(self.install)
         row.removeRequested.connect(self.remove)
         self._rows[row.plugin_id] = row
-        self.rows_layout.insertWidget(self.rows_layout.count() - 1, row)
+        self.rows_layout.addWidget(row)
 
     @staticmethod
     def _catalog_row(entry: CatalogEntry) -> PluginRow:
@@ -278,11 +329,128 @@ class PluginsDialog(QDialog):
 
     @staticmethod
     def _custom_row(plugin: InstalledPlugin) -> PluginRow:
-        return PluginRow(plugin.id, plugin.name, f"Installed from {html.escape(plugin.source)}")
+        notes = []
+        if "extractor" in plugin.kinds:
+            notes.append("Adds support for more sites or YouTube features; works on its own.")
+        if "postprocessor" in plugin.kinds:
+            notes.append(
+                "Adds a processing step that needs its own settings, so it is installed "
+                "but not switched on."
+            )
+        if plugin.revision:
+            notes.append(f"Version {plugin.revision[:10]}.")
+        return PluginRow(
+            plugin.id, plugin.name, f"Installed from {html.escape(plugin.source)}", note=" ".join(notes)
+        )
+
+    # -- GitHub browsing -------------------------------------------------------
+
+    def discover(self) -> None:
+        if self._discovering:
+            return
+        self._discovering = True
+        self.browse_found_button.setEnabled(False)
+        self.browse_found_button.setText("Loading…")
+        self._set_found_status("")
+
+        def task() -> None:
+            try:
+                result: object = list(self._discover())
+            except Exception as exc:
+                result = str(exc) or "Could not load the list."
+            try:
+                self._discovered.emit(result)
+            except RuntimeError:
+                pass  # Dialog closed while loading.
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _on_discovered(self, result: object) -> None:
+        self._discovering = False
+        self.browse_found_button.setEnabled(True)
+        if isinstance(result, str):
+            self.browse_found_button.setText("Try again")
+            self._set_found_status(result, error=True)
+            return
+        self._found = list(result)
+        self.browse_found_button.setText("Refresh list")
+        self.filter_edit.setVisible(True)
+        self._render_found()
+
+    def _set_found_status(self, text: str, error: bool = False) -> None:
+        self.found_status.setText(text)
+        self.found_status.setObjectName("error" if error else "muted")
+        self.found_status.style().unpolish(self.found_status)
+        self.found_status.style().polish(self.found_status)
+        self.found_status.setVisible(bool(text))
+
+    def _render_found(self) -> None:
+        for row in self._found_rows.values():
+            self.found_layout.removeWidget(row)
+            row.deleteLater()
+        self._found_rows.clear()
+        if self._found is None:
+            return
+
+        installed = self.manager.installed()
+        taken = {e.id for e in self._catalog} | {p.id for p in installed}
+        # Plugins already offered or installed under another name (built-in list,
+        # a pasted link, a zip) are recognised by their repository.
+        known_repos = {e.homepage.rstrip("/").lower() for e in self._catalog}
+        known_sources = " ".join(p.source.lower() for p in installed)
+        needle = self.filter_edit.text().strip().lower()
+        matches = [
+            repo
+            for repo in self._found
+            if repo.id not in taken
+            and slug(repo.name) not in taken
+            and repo.url.rstrip("/").lower() not in known_repos
+            and f"/{repo.full_name.lower()}/" not in known_sources
+            and (not needle or needle in repo.full_name.lower() or needle in repo.description.lower())
+        ]
+        for repo in matches[:_MAX_FOUND_ROWS]:
+            row = self._found_row(repo)
+            row.set_installed(False)
+            row.installRequested.connect(self.install)
+            self._found_rows[repo.id] = row
+            self.found_layout.addWidget(row)
+
+        if not matches:
+            self._set_found_status("Nothing matches." if needle else "Nothing new to show.")
+        elif len(matches) > _MAX_FOUND_ROWS:
+            self._set_found_status(
+                f"Showing the {_MAX_FOUND_ROWS} most popular of {len(matches)}. Use the filter to narrow it down."
+            )
+        else:
+            self._set_found_status(f"{len(matches)} found.")
+
+    @staticmethod
+    def _found_row(repo: RepoInfo) -> PluginRow:
+        parts = [f"{repo.stars:,} stars"]
+        if repo.pushed:
+            parts.append(f"updated {html.escape(repo.pushed)}")
+        if repo.license:
+            parts.append(html.escape(repo.license))
+        parts.append(f'<a href="{html.escape(repo.url, quote=True)}">Source code</a>')
+        return PluginRow(
+            repo.id,
+            repo.full_name,
+            " · ".join(parts),
+            repo.description,
+            "Not reviewed. Written by a third party.",
+            repo,
+        )
 
     # -- actions ---------------------------------------------------------------
 
-    def install(self, entry: CatalogEntry) -> None:
+    def install(self, entry: CatalogEntry | RepoInfo) -> None:
+        if isinstance(entry, RepoInfo):
+            row = self._found_rows.get(entry.id)
+            if row is None or row.installed or not self._confirm(entry.url):
+                return
+            row.set_busy()
+            self._run(entry.id, lambda: self.manager.install_github(entry.full_name, entry.default_branch))
+            return
         row = self._rows.get(entry.id)
         if row is None or row.installed:
             return
@@ -327,7 +495,7 @@ class PluginsDialog(QDialog):
                 return
             self.source_edit.clear()
         elif failed:
-            row = self._rows.get(plugin_id)
+            row = self._rows.get(plugin_id) or self._found_rows.get(plugin_id)
             if row is not None:
                 row.set_error(result)
             return
@@ -355,7 +523,7 @@ class PluginsDialog(QDialog):
         answer = QMessageBox.question(
             self,
             "Install this plugin?",
-            "This plugin is not on the built-in list, so it has not been checked. "
+            "This plugin is not on the built-in list, so nobody has checked it. "
             "It will be able to do anything this app can do on your computer.\n\n"
             f"{source}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

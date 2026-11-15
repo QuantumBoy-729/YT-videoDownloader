@@ -32,6 +32,14 @@ MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 MAX_UNPACKED_BYTES = 25 * 1024 * 1024
 MAX_FILES = 500
 _PACKAGE = "yt_dlp_plugins"
+#: GitHub's REST API. Changed by tests to point at a local imitation.
+GITHUB_API = "https://api.github.com"
+USER_AGENT = "UniversalDownloader"
+_GITHUB_REPO = re.compile(
+    r"^https?://(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?"
+    r"(?:/tree/(?P<ref>[^/?#]+))?/?(?:[?#].*)?$"
+)
+_NOT_OWNERS = {"topics", "orgs", "settings", "marketplace", "sponsors", "features", "about"}
 
 
 class PluginError(Exception):
@@ -112,6 +120,8 @@ class InstalledPlugin:
     source: str
     revision: str = ""
     postprocessors: tuple[dict[str, Any], ...] = ()
+    #: What the plugin adds: "extractor" (sites / YouTube features) and/or "postprocessor".
+    kinds: tuple[str, ...] = ()
     path: Path = field(default=Path(), compare=False)
 
 
@@ -141,6 +151,19 @@ def _name_from_source(source: str) -> str:
     return re.sub(r"\.(zip|whl)$", "", stem, flags=re.I) or "plugin"
 
 
+def github_archive_url(source: str) -> tuple[str, str, str] | None:
+    """For a github.com repository page: the API link to its zip, the owner and the repo name.
+
+    ``https://github.com/owner/repo`` (optionally ``/tree/<branch>``) becomes the
+    zip of that branch, or of the default branch when none is given.
+    """
+    match = _GITHUB_REPO.match(source.strip())
+    if not match or match["owner"].lower() in _NOT_OWNERS:
+        return None
+    ref = f"/{match['ref']}" if match["ref"] else ""
+    return f"{GITHUB_API}/repos/{match['owner']}/{match['repo']}/zipball{ref}", match["owner"], match["repo"]
+
+
 def _plugin_members(archive: zipfile.ZipFile) -> tuple[str, list[zipfile.ZipInfo]]:
     """Find the ``yt_dlp_plugins`` folder in ``archive``.
 
@@ -161,8 +184,12 @@ def _plugin_members(archive: zipfile.ZipFile) -> tuple[str, list[zipfile.ZipInfo
     return prefix, members
 
 
-def _extract(data: bytes, destination: Path) -> None:
-    """Unpack only the ``yt_dlp_plugins`` folder of a zip into ``destination``."""
+def _extract(data: bytes, destination: Path) -> tuple[list[str], str]:
+    """Unpack only the ``yt_dlp_plugins`` folder of a zip into ``destination``.
+
+    Returns the kinds of plugin found ("extractor", "postprocessor") and the
+    archive's top-level folder name (GitHub puts the commit hash in it).
+    """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -182,6 +209,15 @@ def _extract(data: bytes, destination: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member) as src, open(target, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+        kinds = sorted(
+            {
+                PurePosixPath(m.filename[len(prefix):]).parts[1]
+                for m in members
+                if len(PurePosixPath(m.filename[len(prefix):]).parts) > 2
+                and PurePosixPath(m.filename[len(prefix):]).parts[1] in ("extractor", "postprocessor")
+            }
+        )
+        return kinds, prefix.strip("/").split("/")[0]
 
 
 class PluginManager:
@@ -189,9 +225,16 @@ class PluginManager:
 
     def __init__(self, root: Path | None = None, opener: urllib.request.OpenerDirector | None = None) -> None:
         self.root = Path(root) if root else default_plugins_dir()
-        self._opener = opener or urllib.request.build_opener()
+        if opener is None:
+            opener = urllib.request.build_opener()
+            opener.addheaders = [("User-Agent", USER_AGENT)]
+        self._opener = opener
         #: True once something was removed that yt-dlp keeps loaded until exit.
         self.needs_restart = False
+
+    @property
+    def opener(self) -> urllib.request.OpenerDirector:
+        return self._opener
 
     # -- queries ---------------------------------------------------------------
 
@@ -209,6 +252,7 @@ class PluginManager:
                         source=str(meta.get("source", "")),
                         revision=str(meta.get("revision", "")),
                         postprocessors=tuple(dict(p) for p in meta.get("postprocessors", [])),
+                        kinds=tuple(str(k) for k in meta.get("kinds", [])),
                         path=folder,
                     )
                 )
@@ -234,8 +278,21 @@ class PluginManager:
     def install_archive(self, source: str) -> InstalledPlugin:
         """Install a plugin from a zip file on disk or an http(s) link to one."""
         source = source.strip()
+        github = github_archive_url(source)
+        if github:
+            source, owner, name = github
+            # Two authors can publish plugins with the same repository name.
+            return self._install(slug(f"{owner}-{name}"), f"{owner}/{name}", source, "", ())
         name = _name_from_source(source)
         return self._install(slug(name), name, source, "", ())
+
+    def install_github(self, full_name: str, ref: str = "") -> InstalledPlugin:
+        """Install a plugin from a GitHub repository (``owner/name``)."""
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", full_name):
+            raise PluginError("That is not a valid GitHub repository name.")
+        owner, repo = full_name.split("/")
+        url = f"{GITHUB_API}/repos/{owner}/{repo}/zipball" + (f"/{ref}" if ref else "")
+        return self._install(slug(f"{owner}-{repo}"), full_name, url, "", ())
 
     def remove(self, plugin_id: str) -> None:
         for plugin in self.installed():
@@ -251,11 +308,16 @@ class PluginManager:
         self.root.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".installing-", dir=self.root))
         try:
-            _extract(data, staging)
+            kinds, top_folder = _extract(data, staging)
+            if not revision:
+                # GitHub names the folder <owner>-<repo>-<commit>, which pins what we got.
+                found = re.search(r"-([0-9a-f]{7,40})$", top_folder)
+                revision = found.group(1) if found else ""
             meta = {
                 "name": name,
                 "source": source,
                 "revision": revision,
+                "kinds": kinds,
                 "postprocessors": list(postprocessors),
             }
             (staging / "plugin.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -267,7 +329,9 @@ class PluginManager:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         self.activate()
-        return InstalledPlugin(plugin_id, name, source, revision, tuple(postprocessors), target)
+        return InstalledPlugin(
+            plugin_id, name, source, revision, tuple(postprocessors), tuple(kinds), target
+        )
 
     def _read(self, source: str) -> bytes:
         if re.match(r"https?://", source, flags=re.I):

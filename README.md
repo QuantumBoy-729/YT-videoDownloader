@@ -63,10 +63,33 @@ pinned to an exact commit so what gets installed cannot change underneath you.
 To add one, append a `CatalogEntry` to `CATALOG` in
 `universal_downloader/core/plugins.py`.
 
-Any other yt-dlp plugin can be installed with **Install from a zip file or
-link**. Plugins that add support for more sites work as soon as they are
-installed; postprocessor plugins outside the list are loaded but not switched
-on, because each needs its own options.
+### More plugins from GitHub
+
+Under **More from GitHub**, press **Browse plugins on GitHub** to list
+everything tagged [`yt-dlp-plugins`](https://github.com/topics/yt-dlp-plugins)
+(around 80 repositories, most-starred first, archived ones left out). Each shows
+its stars, last update and licence, with a link to the source; there is a filter
+box, and **Install** asks for confirmation first. The list is fetched live, so it
+needs an internet connection and is subject to GitHub's request limit for
+anonymous use (about 10 searches a minute).
+
+Nothing on that list has been reviewed. It includes plugins for other tools,
+plugins that need extra programs, and at least one collection of rejected or
+controversial code, so read the description and source before installing.
+
+You can also paste a repository page (`https://github.com/owner/repo`, or a
+`/tree/<branch>` link) or any zip archive into **Install from a zip file or
+link**. Each install records the exact version it fetched.
+
+What to expect once installed:
+
+- **Plugins that add site support or YouTube features** work as soon as they are
+  installed.
+- **Post-processing plugins** outside the built-in list are installed but not
+  switched on, because each one needs its own settings. They are labelled as
+  such in the list.
+- **Plugins that need extra Python packages or programs** may not load, since the
+  app cannot install packages for them.
 
 Good to know:
 

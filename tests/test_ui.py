@@ -12,7 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from universal_downloader.core import JobState, PluginManager  # noqa: E402
+from universal_downloader.core import JobState, PluginManager, RepoInfo  # noqa: E402
 from universal_downloader.ui import fmt  # noqa: E402
 from universal_downloader.ui.main_window import MAX_CONCURRENT, MainWindow  # noqa: E402
 from universal_downloader.ui.plugins_dialog import PluginsDialog  # noqa: E402
@@ -317,3 +317,172 @@ def test_custom_install_error(app, dialog, tmp_path):
     assert pump(app, lambda: dialog.custom_error.isVisible())
     assert "not a zip" in dialog.custom_error.text()
     assert dialog.custom_button.isEnabled() and dialog.source_edit.isEnabled()
+
+
+# -- browsing GitHub ---------------------------------------------------------------
+
+
+def repo(name, stars=10, description="", owner="someone"):
+    return RepoInfo(
+        full_name=f"{owner}/{name}", description=description, stars=stars,
+        pushed="2026-10-01", license="MIT", default_branch="main",
+    )
+
+
+@pytest.fixture
+def browser(window, server, media_dir):
+    (media_dir / "found.zip").write_bytes(pp_zip("Found"))
+    state = {"repos": [], "error": None, "confirm": True, "asked": [], "installs": []}
+
+    def discover():
+        if state["error"]:
+            raise RuntimeError(state["error"])
+        return state["repos"]
+
+    def confirm(url):
+        state["asked"].append(url)
+        return state["confirm"]
+
+    dlg = PluginsDialog(window.plugins, window._theme, window, catalog=(), confirm=confirm, discover=discover)
+    # Serve every repo's archive from the local test server.
+    original = window.plugins.install_github
+
+    def install_github(full_name, ref=""):
+        state["installs"].append((full_name, ref))
+        from universal_downloader.core import plugins as plugins_module
+
+        return window.plugins._install(
+            plugins_module.slug(full_name.replace("/", "-")), full_name.split("/")[1],
+            f"{server}/found.zip", "", (),
+        )
+
+    window.plugins.install_github = install_github
+    dlg.state = state
+    dlg.show()
+    yield dlg
+    window.plugins.install_github = original
+    dlg.close()
+
+
+def test_found_list_is_hidden_until_browsing(browser):
+    assert browser._found_rows == {}
+    assert not browser.filter_edit.isVisible() and not browser.found_status.isVisible()
+    assert browser.browse_found_button.text() == "Browse plugins on GitHub"
+
+
+def test_browse_lists_repos(app, browser):
+    browser.state["repos"] = [repo("alpha", 500, "Adds alpha site"), repo("beta", 20)]
+    browser.browse_found_button.click()
+    assert browser.browse_found_button.text() == "Loading…" and not browser.browse_found_button.isEnabled()
+    assert pump(app, lambda: len(browser._found_rows) == 2)
+    assert list(browser._found_rows) == ["someone-alpha", "someone-beta"]
+    assert browser.browse_found_button.text() == "Refresh list" and browser.browse_found_button.isEnabled()
+    assert browser.filter_edit.isVisible()
+    assert browser.found_status.text() == "2 found."
+    row = browser._found_rows["someone-alpha"]
+    assert row.button.text() == "Install" and "500 stars" in row.details_label.text()
+
+
+def test_browse_error_can_be_retried(app, browser):
+    browser.state["error"] = "GitHub's request limit was reached."
+    browser.browse_found_button.click()
+    assert pump(app, lambda: browser.found_status.isVisible())
+    assert browser.found_status.text() == "GitHub's request limit was reached."
+    assert browser.found_status.objectName() == "error"
+    assert browser.browse_found_button.text() == "Try again" and browser.browse_found_button.isEnabled()
+
+    browser.state.update(error=None, repos=[repo("alpha")])
+    browser.browse_found_button.click()
+    assert pump(app, lambda: "someone-alpha" in browser._found_rows)
+    assert browser.found_status.objectName() == "muted"
+
+
+def test_filter_matches_name_and_description(app, browser):
+    browser.state["repos"] = [repo("alpha-site", description="Video host"), repo("beta", description="Subtitles")]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: len(browser._found_rows) == 2)
+
+    browser.filter_edit.setText("subtitle")
+    assert list(browser._found_rows) == ["someone-beta"]
+    browser.filter_edit.setText("ALPHA")
+    assert list(browser._found_rows) == ["someone-alpha-site"]
+    browser.filter_edit.setText("zzz")
+    assert browser._found_rows == {} and browser.found_status.text() == "Nothing matches."
+    browser.filter_edit.clear()
+    assert len(browser._found_rows) == 2
+
+
+def test_only_the_most_popular_are_shown(app, browser):
+    browser.state["repos"] = [repo(f"plugin-{i}") for i in range(60)]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: len(browser._found_rows) == 40)
+    assert "40 most popular of 60" in browser.found_status.text()
+
+
+def test_install_found_plugin_asks_first(app, window, browser):
+    browser.state["repos"] = [repo("alpha")]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: "someone-alpha" in browser._found_rows)
+
+    browser.state["confirm"] = False
+    browser._found_rows["someone-alpha"].button.click()
+    assert browser.state["asked"] == ["https://github.com/someone/alpha"]
+    assert browser.state["installs"] == [] and window.plugins.installed() == []
+
+    browser.state["confirm"] = True
+    browser._found_rows["someone-alpha"].button.click()
+    assert browser._found_rows["someone-alpha"].button.text() == "Installing…"
+    assert pump(app, lambda: window.plugins.is_installed("someone-alpha"))
+    assert browser.state["installs"] == [("someone/alpha", "main")]
+
+    # It moves from "found" to the installed list and no longer offers Install.
+    assert pump(app, lambda: "someone-alpha" in browser._rows)
+    assert "someone-alpha" not in browser._found_rows
+    assert browser._rows["someone-alpha"].button.text() == "Remove"
+    assert window.plugins.installed()[0].kinds == ("postprocessor",)
+
+
+def test_failed_found_install_shows_reason(app, window, browser, monkeypatch):
+    browser.state["repos"] = [repo("alpha")]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: "someone-alpha" in browser._found_rows)
+
+    def boom(full_name, ref=""):
+        from universal_downloader.core import PluginError
+
+        raise PluginError("Could not download the plugin: HTTP Error 404")
+
+    monkeypatch.setattr(window.plugins, "install_github", boom)
+    browser._found_rows["someone-alpha"].button.click()
+    assert pump(app, lambda: browser._found_rows["someone-alpha"].error_label.isVisible())
+    assert "404" in browser._found_rows["someone-alpha"].error_label.text()
+    assert browser._found_rows["someone-alpha"].button.isEnabled()
+
+
+def test_already_installed_and_catalog_plugins_are_not_offered_again(app, window, browser, tmp_path):
+    archive = tmp_path / "alpha.zip"
+    archive.write_bytes(pp_zip("Alpha"))
+    window.plugins.install_archive(str(archive))
+    browser.reload()
+    browser.state["repos"] = [repo("alpha"), repo("beta")]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: "someone-beta" in browser._found_rows)
+    assert list(browser._found_rows) == ["someone-beta"]
+
+
+def test_repos_known_by_source_are_not_offered_again(app, window, browser):
+    from universal_downloader.core import CATALOG
+
+    catalog_repo = CATALOG[0].homepage.removeprefix("https://github.com/")
+    browser.state["repos"] = [repo(catalog_repo.split("/")[1], owner=catalog_repo.split("/")[0]), repo("fresh")]
+    browser._catalog = tuple(CATALOG)
+    browser.browse_found_button.click()
+    assert pump(app, lambda: "someone-fresh" in browser._found_rows)
+    assert list(browser._found_rows) == ["someone-fresh"]
+
+
+def test_duplicate_repo_names_get_separate_rows(app, browser):
+    browser.state["repos"] = [repo("yt-dlp-plugins", owner="one"), repo("yt-dlp-plugins", owner="two")]
+    browser.browse_found_button.click()
+    assert pump(app, lambda: len(browser._found_rows) == 2)
+    assert browser.found_layout.count() == 2

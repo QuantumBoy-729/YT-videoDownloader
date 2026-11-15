@@ -10,6 +10,7 @@ from .models import (
     Progress,
 )
 from .options import build_options
+from .discovery import RepoInfo, search_topic
 from .plugins import CATALOG, CatalogEntry, InstalledPlugin, PluginError, PluginManager
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "InstalledPlugin",
     "PluginError",
     "PluginManager",
+    "RepoInfo",
     "VIDEO_FORMATS",
     "DownloadJob",
     "DownloadRequest",
@@ -28,4 +30,5 @@ __all__ = [
     "build_options",
     "fetch_info",
     "find_ffmpeg",
+    "search_topic",
 ]

@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from yt_downloader.core import DownloadJob, DownloadRequest, JobState, fetch_info
-from yt_downloader.core.engine import clean_error
+from universal_downloader.core import DownloadJob, DownloadRequest, JobState, fetch_info
+from universal_downloader.core.engine import clean_error
 
 from .conftest import NO_PROXY
 

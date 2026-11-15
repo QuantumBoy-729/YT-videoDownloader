@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from yt_downloader.core import find_ffmpeg
+from universal_downloader.core import find_ffmpeg
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

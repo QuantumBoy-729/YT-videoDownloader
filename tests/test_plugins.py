@@ -8,7 +8,7 @@ import zipfile
 
 import pytest
 
-from yt_downloader.core import (
+from universal_downloader.core import (
     CATALOG,
     CatalogEntry,
     DownloadJob,
@@ -19,7 +19,7 @@ from yt_downloader.core import (
     build_options,
     fetch_info,
 )
-from yt_downloader.core import plugins as plugins_module
+from universal_downloader.core import plugins as plugins_module
 
 from .conftest import NO_PROXY
 

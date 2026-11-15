@@ -3,7 +3,7 @@
     pip install ".[build]"
     python packaging/build.py
 
-The result is written to ``dist/`` (``YTDownloader.exe`` on Windows). It
+The result is written to ``dist/`` (``UniversalDownloader.exe`` on Windows). It
 contains Python, Qt, yt-dlp and an ffmpeg binary, so it runs on machines with
 nothing else installed.
 """
@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def main() -> None:
     PyInstaller.__main__.run(
         [
-            str(ROOT / "yt_downloader" / "__main__.py"),
-            "--name=YTDownloader",
+            str(ROOT / "universal_downloader" / "__main__.py"),
+            "--name=UniversalDownloader",
             "--onefile",
             "--windowed",
             "--noconfirm",

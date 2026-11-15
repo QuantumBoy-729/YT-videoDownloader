@@ -1,4 +1,4 @@
-# YT Downloader
+# Universal Downloader
 
 A desktop app for saving videos and audio from YouTube and the
 [many other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
@@ -31,14 +31,14 @@ Requires Python 3.10 or newer.
 git clone https://github.com/QuantumBoy-729/YT-videoDownloader.git
 cd YT-videoDownloader
 pip install .
-yt-downloader
+universal-downloader
 ```
 
 Or run it straight from the checkout:
 
 ```bash
 pip install yt-dlp PySide6-Essentials imageio-ffmpeg
-python -m yt_downloader
+python -m universal_downloader
 ```
 
 Sites change often and old yt-dlp versions stop working. If downloads start
@@ -61,7 +61,7 @@ The list comes from [yt-dlp's own plugin page](https://github.com/yt-dlp/yt-dlp/
 limited to plugins that do something useful in this app, and each one is
 pinned to an exact commit so what gets installed cannot change underneath you.
 To add one, append a `CatalogEntry` to `CATALOG` in
-`yt_downloader/core/plugins.py`.
+`universal_downloader/core/plugins.py`.
 
 Any other yt-dlp plugin can be installed with **Install from a zip file or
 link**. Plugins that add support for more sites work as soon as they are
@@ -74,14 +74,14 @@ Good to know:
   as the app. Install only ones you trust.
 - Only the plugin's `yt_dlp_plugins` folder is unpacked - its `setup.py` is
   never run and extra Python packages it may depend on are not installed.
-- Plugins are kept in a per-user folder (`%APPDATA%\YTDownloader\plugins` on
-  Windows, `~/.local/share/yt-downloader/plugins` on Linux,
-  `~/Library/Application Support/YTDownloader/plugins` on macOS), so they work
+- Plugins are kept in a per-user folder (`%APPDATA%\UniversalDownloader\plugins` on
+  Windows, `~/.local/share/universal-downloader/plugins` on Linux,
+  `~/Library/Application Support/UniversalDownloader/plugins` on macOS), so they work
   in the packaged executable too and survive app updates.
 
 ## Windows executable
 
-A single-file `YTDownloader.exe` (no Python needed) is built by GitHub Actions:
+A single-file `UniversalDownloader.exe` (no Python needed) is built by GitHub Actions:
 download it from the latest run's artifacts, or from the release page for
 tagged versions (`v*`). To build it yourself:
 
@@ -104,7 +104,7 @@ The tests need ffmpeg but no internet: they serve generated clips from a local
 HTTP server and drive both the download engine and the real window (offscreen).
 
 ```
-yt_downloader/
+universal_downloader/
   core/      download engine - no GUI imports, usable on its own
     options.py   DownloadRequest -> yt-dlp options (format selection)
     engine.py    DownloadJob (pause/resume/cancel), fetch_info, find_ffmpeg
@@ -119,7 +119,7 @@ Using the engine without the GUI:
 
 ```python
 from pathlib import Path
-from yt_downloader.core import DownloadJob, DownloadRequest
+from universal_downloader.core import DownloadJob, DownloadRequest
 
 job = DownloadJob(
     DownloadRequest(url="https://...", output_dir=Path("videos"), max_height=1080),

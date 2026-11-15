@@ -12,10 +12,10 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from yt_downloader.core import JobState, PluginManager  # noqa: E402
-from yt_downloader.ui import fmt  # noqa: E402
-from yt_downloader.ui.main_window import MAX_CONCURRENT, MainWindow  # noqa: E402
-from yt_downloader.ui.plugins_dialog import PluginsDialog  # noqa: E402
+from universal_downloader.core import JobState, PluginManager  # noqa: E402
+from universal_downloader.ui import fmt  # noqa: E402
+from universal_downloader.ui.main_window import MAX_CONCURRENT, MainWindow  # noqa: E402
+from universal_downloader.ui.plugins_dialog import PluginsDialog  # noqa: E402
 
 from .conftest import NO_PROXY  # noqa: E402
 from .test_plugins import entry, pp_zip  # noqa: E402
@@ -247,7 +247,7 @@ def test_plugins_dialog_lists_catalog(dialog):
 
 
 def test_default_dialog_shows_the_real_catalog(app, window):
-    from yt_downloader.core import CATALOG
+    from universal_downloader.core import CATALOG
 
     dlg = window.show_plugins()
     assert list(dlg._rows) == [e.id for e in CATALOG]

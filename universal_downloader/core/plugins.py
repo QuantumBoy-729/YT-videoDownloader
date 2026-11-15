@@ -119,11 +119,11 @@ def default_plugins_dir() -> Path:
     """Per-user folder where this app keeps the plugins it installs."""
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        return base / "YTDownloader" / "plugins"
+        return base / "UniversalDownloader" / "plugins"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "YTDownloader" / "plugins"
+        return Path.home() / "Library" / "Application Support" / "UniversalDownloader" / "plugins"
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / "yt-downloader" / "plugins"
+    return base / "universal-downloader" / "plugins"
 
 
 def slug(text: str) -> str:

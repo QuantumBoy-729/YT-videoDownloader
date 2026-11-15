@@ -80,7 +80,7 @@ class MainWindow(QMainWindow):
             self.plugins.activate()
         except Exception:
             pass  # A broken plugin folder must never stop the app from starting.
-        self._settings = settings or QSettings("YTDownloader", "YTDownloader")
+        self._settings = settings or QSettings("UniversalDownloader", "UniversalDownloader")
         self._job_options = job_options or {}
         self._info_options = info_options or {}
         self._theme = themes.by_name(self._settings.value("theme", "system"))

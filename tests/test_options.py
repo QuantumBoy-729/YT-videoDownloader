@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yt_dlp
 
-from yt_downloader.core import DownloadRequest, build_options
+from universal_downloader.core import DownloadRequest, build_options
 
 
 def _video(fid, height, ext, vcodec, tbr):

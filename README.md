@@ -16,6 +16,8 @@ supported by yt-dlp. Built with Python, Qt (PySide6) and yt-dlp.
   partial file.
 - **Playlists** - download a whole playlist, or just the one video from a
   playlist link.
+- **Plugins** - install add-ons for the download engine from a built-in list,
+  or any other yt-dlp plugin from its zip archive (see [Plugins](#plugins)).
 - **Light and dark themes**, drag-and-drop links, and your folder/format/quality
   choices remembered between runs.
 - **No ffmpeg setup** - an ffmpeg binary is installed with the app. A system
@@ -46,6 +48,37 @@ failing, update it first:
 pip install -U yt-dlp
 ```
 
+## Plugins
+
+Open **Plugins** in the top-right corner to install or remove add-ons.
+
+| Plugin | What it does | Source |
+| --- | --- | --- |
+| Upload date as file date | Sets each file's modified date to the video's upload date, so folders sort by release date. | [bradenhilton/yt-dlp-FixupMtime](https://github.com/bradenhilton/yt-dlp-FixupMtime) |
+| DeArrow titles | Names YouTube downloads with the community-written [DeArrow](https://dearrow.ajay.app/) title when one exists. Contacts `sponsor.ajay.app` for each download. | [QuantumWarpCode/yt-dlp-dearrow](https://github.com/QuantumWarpCode/yt-dlp-dearrow) |
+
+The list comes from [yt-dlp's own plugin page](https://github.com/yt-dlp/yt-dlp/wiki/Plugins),
+limited to plugins that do something useful in this app, and each one is
+pinned to an exact commit so what gets installed cannot change underneath you.
+To add one, append a `CatalogEntry` to `CATALOG` in
+`yt_downloader/core/plugins.py`.
+
+Any other yt-dlp plugin can be installed with **Install from a zip file or
+link**. Plugins that add support for more sites work as soon as they are
+installed; postprocessor plugins outside the list are loaded but not switched
+on, because each needs its own options.
+
+Good to know:
+
+- Plugins are third-party code and run with the same access to your computer
+  as the app. Install only ones you trust.
+- Only the plugin's `yt_dlp_plugins` folder is unpacked - its `setup.py` is
+  never run and extra Python packages it may depend on are not installed.
+- Plugins are kept in a per-user folder (`%APPDATA%\YTDownloader\plugins` on
+  Windows, `~/.local/share/yt-downloader/plugins` on Linux,
+  `~/Library/Application Support/YTDownloader/plugins` on macOS), so they work
+  in the packaged executable too and survive app updates.
+
 ## Windows executable
 
 A single-file `YTDownloader.exe` (no Python needed) is built by GitHub Actions:
@@ -75,8 +108,9 @@ yt_downloader/
   core/      download engine - no GUI imports, usable on its own
     options.py   DownloadRequest -> yt-dlp options (format selection)
     engine.py    DownloadJob (pause/resume/cancel), fetch_info, find_ffmpeg
+    plugins.py   plugin catalog, installer and yt-dlp loading
   ui/        Qt interface
-    main_window.py, queue_item.py, theme.py, ...
+    main_window.py, queue_item.py, plugins_dialog.py, theme.py, ...
 packaging/   PyInstaller build script
 tests/
 ```

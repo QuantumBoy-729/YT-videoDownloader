@@ -37,7 +37,9 @@ from ..core import (
     find_ffmpeg,
 )
 from ..core.models import DEFAULT_HEIGHTS
+from ..core.plugins import PluginManager
 from . import fmt, icons, theme as themes
+from .plugins_dialog import PluginsDialog
 from .queue_item import QueueItem
 from .widgets import ElidedLabel, IconButton, rounded
 
@@ -70,8 +72,14 @@ class MainWindow(QMainWindow):
         settings: QSettings | None = None,
         job_options: dict[str, Any] | None = None,
         info_options: dict[str, Any] | None = None,
+        plugins: PluginManager | None = None,
     ) -> None:
         super().__init__()
+        self.plugins = plugins or PluginManager()
+        try:
+            self.plugins.activate()
+        except Exception:
+            pass  # A broken plugin folder must never stop the app from starting.
         self._settings = settings or QSettings("YTDownloader", "YTDownloader")
         self._job_options = job_options or {}
         self._info_options = info_options or {}
@@ -113,7 +121,12 @@ class MainWindow(QMainWindow):
         self.theme_button.clicked.connect(self.toggle_theme)
         header = QHBoxLayout()
         header.addWidget(title)
+        self.plugins_button = QPushButton(" Plugins")
+        self.plugins_button.setObjectName("flat")
+        self.plugins_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.plugins_button.clicked.connect(self.show_plugins)
         header.addStretch(1)
+        header.addWidget(self.plugins_button)
         header.addWidget(self.theme_button)
         layout.addLayout(header)
 
@@ -306,6 +319,7 @@ class MainWindow(QMainWindow):
             "Switch to light theme" if theme.name == "dark" else "Switch to dark theme",
         )
         self.paste_button.setIcon(icons.icon("paste", theme.text))
+        self.plugins_button.setIcon(icons.icon("package", theme.muted))
         self.download_button.setIcon(icons.icon("download", theme.accent_text, theme.muted))
         self.folder_icon.setPixmap(icons.pixmap("folder", theme.muted, 16))
         if self._info is None or self.thumb.property("placeholder"):
@@ -317,6 +331,12 @@ class MainWindow(QMainWindow):
         theme = themes.LIGHT if self._theme.name == "dark" else themes.DARK
         self._settings.setValue("theme", theme.name)
         self.apply_theme(theme)
+
+    def show_plugins(self) -> PluginsDialog:
+        dialog = PluginsDialog(self.plugins, self._theme, self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+        return dialog
 
     # -- options ---------------------------------------------------------------
 
@@ -506,7 +526,8 @@ class MainWindow(QMainWindow):
             playlist=self.playlist_check.isChecked(),
         )
         title = self._info.title if self._info else url
-        item = QueueItem(request, title, self._theme, self._job_options)
+        job_options = {**self._job_options, "plugin_postprocessors": self.plugins.postprocessors()}
+        item = QueueItem(request, title, self._theme, job_options)
         item.changed.connect(self._pump)
         item.removeRequested.connect(self.remove_item)
         self._items.insert(0, item)

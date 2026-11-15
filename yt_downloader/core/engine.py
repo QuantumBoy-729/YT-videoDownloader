@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
@@ -113,8 +113,8 @@ def fetch_info(url: str, extra_opts: dict[str, Any] | None = None) -> MediaInfo:
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-    except DownloadError as exc:
-        raise RuntimeError(clean_error(str(exc))) from exc
+    except Exception as exc:  # DownloadError, but also e.g. unsupported URL schemes.
+        raise RuntimeError(clean_error(str(exc) or repr(exc))) from exc
     if not info:
         raise RuntimeError("No media found at this URL")
 
@@ -158,8 +158,10 @@ class DownloadJob:
         on_state: Callable[[JobState], None] | None = None,
         ffmpeg_path: Any = _AUTO,
         extra_opts: dict[str, Any] | None = None,
+        plugin_postprocessors: Iterable[dict[str, Any]] = (),
     ) -> None:
         self.request = request
+        self._plugin_postprocessors = [dict(pp) for pp in plugin_postprocessors]
         self._on_progress = on_progress or (lambda p: None)
         self._on_state = on_state or (lambda s: None)
         self._ffmpeg = find_ffmpeg() if ffmpeg_path is _AUTO else ffmpeg_path
@@ -205,7 +207,7 @@ class DownloadJob:
             self._set_state_locked(JobState.RUNNING)
 
         logger = _Logger()
-        opts = build_options(self.request, self._ffmpeg)
+        opts = build_options(self.request, self._ffmpeg, self._plugin_postprocessors)
         opts["logger"] = logger
         opts["progress_hooks"] = [self._progress_hook]
         opts["postprocessor_hooks"] = [self._postprocessor_hook]

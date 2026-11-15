@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import urllib.request
 
 import pytest
 
@@ -11,11 +12,13 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from yt_downloader.core import JobState  # noqa: E402
+from yt_downloader.core import JobState, PluginManager  # noqa: E402
 from yt_downloader.ui import fmt  # noqa: E402
 from yt_downloader.ui.main_window import MAX_CONCURRENT, MainWindow  # noqa: E402
+from yt_downloader.ui.plugins_dialog import PluginsDialog  # noqa: E402
 
 from .conftest import NO_PROXY  # noqa: E402
+from .test_plugins import entry, pp_zip  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -27,7 +30,13 @@ def app():
 def window(app, tmp_path):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     settings.setValue("output_dir", str(tmp_path / "out"))
-    win = MainWindow(settings=settings, job_options={"extra_opts": NO_PROXY}, info_options=NO_PROXY)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    win = MainWindow(
+        settings=settings,
+        job_options={"extra_opts": NO_PROXY},
+        info_options=NO_PROXY,
+        plugins=PluginManager(tmp_path / "plugins", opener=opener),
+    )
     win.show()
     yield win
     for item in list(win._items):
@@ -173,7 +182,7 @@ def test_settings_persist(app, window, tmp_path):
     window.toggle_theme()
     theme = window._theme.name
 
-    again = MainWindow(settings=window._settings)
+    again = MainWindow(settings=window._settings, plugins=window.plugins)
     assert again.audio_only
     assert again.format_combo.currentData() == "m4a"
     assert again.output_dir == tmp_path / "elsewhere"
@@ -204,3 +213,107 @@ def test_clock_format():
     assert fmt.clock(75) == "1:15"
     assert fmt.clock(3675) == "1:01:15"
     assert fmt.clock(None) == ""
+
+
+# -- plugins ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def dialog(window, server, media_dir):
+    (media_dir / "ui-plugin.zip").write_bytes(pp_zip("UiMarker"))
+    catalog = (
+        entry("ui-marker", f"{server}/ui-plugin.zip", "UiMarker"),
+        entry("ui-broken", f"{server}/does-not-exist.zip", "UiBroken"),
+    )
+    answers = {"confirm": True, "asked": []}
+
+    def confirm(source):
+        answers["asked"].append(source)
+        return answers["confirm"]
+
+    dlg = PluginsDialog(window.plugins, window._theme, window, catalog=catalog, confirm=confirm)
+    dlg.answers = answers
+    dlg.show()
+    yield dlg
+    dlg.close()
+
+
+def test_plugins_dialog_lists_catalog(dialog):
+    assert list(dialog._rows) == ["ui-marker", "ui-broken"]
+    row = dialog.row("ui-marker")
+    assert row.button.text() == "Install" and not row.badge.isVisible()
+    assert not dialog.restart_label.isVisible()
+    assert not dialog.custom_button.isEnabled()
+
+
+def test_default_dialog_shows_the_real_catalog(app, window):
+    from yt_downloader.core import CATALOG
+
+    dlg = window.show_plugins()
+    assert list(dlg._rows) == [e.id for e in CATALOG]
+    assert all(r.button.text() == "Install" for r in dlg._rows.values())
+    dlg.close()
+
+
+def test_install_and_remove_from_dialog(app, window, dialog, server, tmp_path):
+    dialog.row("ui-marker").button.click()
+    assert dialog.row("ui-marker").button.text() == "Installing…"
+    assert pump(app, lambda: dialog.row("ui-marker").installed)
+    # The list is rebuilt after an install; let Qt show the new row.
+    assert pump(app, lambda: dialog.row("ui-marker").badge.isVisible())
+    row = dialog.row("ui-marker")
+    assert row.button.text() == "Remove"
+    assert window.plugins.is_installed("ui-marker")
+
+    # The plugin now takes part in downloads started from the main window.
+    window.url_edit.setText(f"{server}/clip.mp4")
+    item = window.enqueue()
+    assert pump(app, lambda: item.result is not None)
+    assert item.state is JobState.DONE, item.result.error
+    assert sorted(p.suffix for p in (tmp_path / "out").iterdir()) == [".UiMarker", ".mp4"]
+
+    dialog.row("ui-marker").button.click()
+    assert not window.plugins.is_installed("ui-marker")
+    assert dialog.row("ui-marker").button.text() == "Install"
+    assert not dialog.restart_label.isVisible()
+
+
+def test_failed_install_shows_reason(app, dialog):
+    dialog.row("ui-broken").button.click()
+    assert pump(app, lambda: dialog.row("ui-broken").error_label.isVisible())
+    row = dialog.row("ui-broken")
+    assert "Could not download" in row.error_label.text()
+    assert row.button.text() == "Install" and row.button.isEnabled()
+
+
+def test_custom_install_needs_confirmation(app, window, dialog, tmp_path):
+    archive = tmp_path / "Extra-Site.zip"
+    archive.write_bytes(pp_zip("ExtraSite"))
+    dialog.source_edit.setText(str(archive))
+    assert dialog.custom_button.isEnabled()
+
+    dialog.answers["confirm"] = False
+    dialog.custom_button.click()
+    assert dialog.answers["asked"] == [str(archive)]
+    assert window.plugins.installed() == []
+
+    dialog.answers["confirm"] = True
+    dialog.custom_button.click()
+    assert pump(app, lambda: dialog.row("extra-site") is not None)
+    assert dialog.row("extra-site").installed
+    assert pump(app, lambda: dialog.row("extra-site").badge.isVisible())
+    assert dialog.source_edit.text() == ""
+
+    dialog.row("extra-site").button.click()
+    assert dialog.row("extra-site") is None
+    assert dialog.restart_label.isVisible()
+
+
+def test_custom_install_error(app, dialog, tmp_path):
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"nope")
+    dialog.source_edit.setText(str(bad))
+    dialog.custom_button.click()
+    assert pump(app, lambda: dialog.custom_error.isVisible())
+    assert "not a zip" in dialog.custom_error.text()
+    assert dialog.custom_button.isEnabled() and dialog.source_edit.isEnabled()

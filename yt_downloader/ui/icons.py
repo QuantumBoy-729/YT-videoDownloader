@@ -18,6 +18,7 @@ _PATHS = {
     "moon": '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
     "retry": '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
     "film": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+    "package": '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
     "chevron": '<path d="M6 9l6 6 6-6"/>',
     "alert": '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.2"/>',
 }

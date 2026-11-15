@@ -10,9 +10,15 @@ from .models import (
     Progress,
 )
 from .options import build_options
+from .plugins import CATALOG, CatalogEntry, InstalledPlugin, PluginError, PluginManager
 
 __all__ = [
     "AUDIO_FORMATS",
+    "CATALOG",
+    "CatalogEntry",
+    "InstalledPlugin",
+    "PluginError",
+    "PluginManager",
     "VIDEO_FORMATS",
     "DownloadJob",
     "DownloadRequest",

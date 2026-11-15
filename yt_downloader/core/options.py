@@ -5,7 +5,7 @@ Kept free of side effects so the format logic can be unit-tested offline.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from .models import DownloadRequest
 
@@ -16,8 +16,15 @@ _PREFERRED_EXT = {"mp4": "mp4:m4a", "webm": "webm:webm", "mkv": "mp4:m4a"}
 _MERGE = {"mp4": "mp4/mkv", "webm": "webm/mkv", "mkv": "mkv"}
 
 
-def build_options(request: DownloadRequest, ffmpeg_path: str | None) -> dict[str, Any]:
+def build_options(
+    request: DownloadRequest,
+    ffmpeg_path: str | None,
+    plugin_postprocessors: Iterable[dict[str, Any]] = (),
+) -> dict[str, Any]:
     """Return yt-dlp options for ``request``.
+
+    ``plugin_postprocessors`` are extra yt-dlp postprocessor entries contributed
+    by installed plugins; they run after the built-in ones for their stage.
 
     ``ffmpeg_path`` is the ffmpeg binary to use, or ``None`` when ffmpeg is not
     available. Without ffmpeg, separate video and audio streams cannot be
@@ -42,6 +49,12 @@ def build_options(request: DownloadRequest, ffmpeg_path: str | None) -> dict[str
     }
     if ffmpeg_path:
         opts["ffmpeg_location"] = ffmpeg_path
+    _select_format(opts, request, ffmpeg_path)
+    opts["postprocessors"] += [dict(pp) for pp in plugin_postprocessors]
+    return opts
+
+
+def _select_format(opts: dict[str, Any], request: DownloadRequest, ffmpeg_path: str | None) -> None:
 
     if request.audio_only:
         opts["format"] = "bestaudio/best"
@@ -55,7 +68,7 @@ def build_options(request: DownloadRequest, ffmpeg_path: str | None) -> dict[str
                 },
                 {"key": "FFmpegMetadata"},
             ]
-        return opts
+        return
 
     height = request.max_height
     limit = f"[height<={height}]" if height else ""
@@ -65,7 +78,7 @@ def build_options(request: DownloadRequest, ffmpeg_path: str | None) -> dict[str
         # Only formats that already contain both video and audio.
         opts["format"] = f"best{limit}/best"
         opts["format_sort"] = [f"res:{height}" if height else "res", f"ext:{container}"]
-        return opts
+        return
 
     # Best video + best audio, falling back to a combined file. If nothing fits
     # under the height limit, take the closest thing rather than failing.
@@ -83,4 +96,3 @@ def build_options(request: DownloadRequest, ffmpeg_path: str | None) -> dict[str
             {"key": "FFmpegVideoRemuxer", "preferedformat": container}
         )
     opts["postprocessors"].append({"key": "FFmpegMetadata"})
-    return opts

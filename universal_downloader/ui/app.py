@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import sys
 
@@ -22,9 +23,31 @@ def _use_bundled_certificates() -> None:
             pass
 
 
+def keep_gc_on_main_thread(parent) -> list[QTimer]:
+    """Run Python's garbage collector only on the GUI thread.
+
+    Left automatic, a collection can start on any thread, including a download
+    worker. If it then frees a Qt widget (a closed dialog, a removed queue item)
+    it destroys the underlying C++ object from the wrong thread, which corrupts
+    memory and crashes the app. So automatic collection is switched off and a
+    timer on the GUI thread does the work instead.
+    """
+    gc.disable()
+    young = QTimer(parent)
+    young.setInterval(1000)
+    young.timeout.connect(lambda: gc.collect(1))
+    full = QTimer(parent)
+    full.setInterval(60_000)
+    full.timeout.connect(gc.collect)
+    young.start()
+    full.start()
+    return [young, full]
+
+
 def main(argv: list[str] | None = None) -> int:
     _use_bundled_certificates()
     app = QApplication(sys.argv if argv is None else argv)
+    keep_gc_on_main_thread(app)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     window = MainWindow()

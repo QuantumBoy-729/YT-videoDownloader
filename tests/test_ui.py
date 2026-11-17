@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import time
 import urllib.request
 
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from universal_downloader.core import JobState, PluginManager, RepoInfo  # noqa: E402
 from universal_downloader.ui import fmt  # noqa: E402
+from universal_downloader.ui.app import keep_gc_on_main_thread  # noqa: E402
 from universal_downloader.ui.main_window import MAX_CONCURRENT, MainWindow  # noqa: E402
 from universal_downloader.ui.plugins_dialog import PluginsDialog  # noqa: E402
 
@@ -23,7 +25,19 @@ from .test_plugins import entry, pp_zip  # noqa: E402
 
 @pytest.fixture(scope="session")
 def app():
-    return QApplication.instance() or QApplication([])
+    application = QApplication.instance() or QApplication([])
+    timers = keep_gc_on_main_thread(application)  # same GC policy as the real app
+    yield application
+    for timer in timers:
+        timer.stop()
+    gc.enable()
+    # Destroy every window while Qt is still fully alive, instead of leaving it to
+    # interpreter shutdown, which can corrupt reference counts in PySide6.
+    for widget in application.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    application.processEvents()
+    gc.collect()
 
 
 @pytest.fixture

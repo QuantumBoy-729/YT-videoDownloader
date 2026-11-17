@@ -7,6 +7,7 @@ or works with this app. Everything found is unreviewed third-party code.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -80,7 +81,10 @@ def search_topic(
 
     found = []
     for item in data.get("items", []) if isinstance(data, dict) else []:
-        if not isinstance(item, dict) or not item.get("full_name") or item.get("archived"):
+        if not isinstance(item, dict) or item.get("archived"):
+            continue
+        # Only accept plain owner/name pairs, so nothing odd can end up in a link or a path.
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", str(item.get("full_name") or "")):
             continue
         found.append(
             RepoInfo(
@@ -90,7 +94,7 @@ def search_topic(
                 pushed=str(item.get("pushed_at") or "")[:10],
                 license=(item.get("license") or {}).get("spdx_id") or "",
                 default_branch=item.get("default_branch") or "HEAD",
-                url=item.get("html_url") or "",
+                url="",  # always https://github.com/<owner>/<name>, built from the validated name
             )
         )
     return found

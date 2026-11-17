@@ -20,9 +20,15 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, YoutubeDLError
 
-from . import site_fixes  # noqa: F401  (importing it registers the fixes with yt-dlp)
 from .models import DownloadRequest, JobResult, JobState, MediaInfo, Progress
 from .options import build_options
+
+try:
+    # Importing this registers the site fixes with yt-dlp. A future yt-dlp that
+    # reorganises the extractor it patches must not stop the app from starting.
+    from . import site_fixes  # noqa: F401
+except Exception:  # pragma: no cover - only reachable with an incompatible yt-dlp
+    pass
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _AUTO = object()

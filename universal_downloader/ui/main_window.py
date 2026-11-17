@@ -38,7 +38,7 @@ from ..core import (
 )
 from ..core.models import DEFAULT_HEIGHTS
 from ..core.plugins import PluginManager
-from . import fmt, icons, theme as themes
+from . import appicon, fmt, icons, theme as themes
 from .plugins_dialog import PluginsDialog
 from .queue_item import QueueItem
 from .widgets import ElidedLabel, IconButton, rounded
@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self._items: list[QueueItem] = []
 
         self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(appicon.app_icon())
         self.setMinimumSize(640, 560)
         self.resize(880, 760)
         self.setAcceptDrops(True)

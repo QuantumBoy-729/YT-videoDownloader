@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .. import APP_NAME, __version__
-from ..core import find_ffmpeg
+from .. import selfcheck
 from .main_window import MainWindow
 
 
@@ -46,17 +46,43 @@ def keep_gc_on_main_thread(parent) -> list[QTimer]:
 
 def main(argv: list[str] | None = None) -> int:
     _use_bundled_certificates()
-    app = QApplication(sys.argv if argv is None else argv)
+    if os.name == "nt":
+        # Without this, Windows groups the window under python.exe's icon.
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("UniversalDownloader.App")
+        except Exception:
+            pass
+    args = sys.argv if argv is None else argv
+    app = QApplication.instance() or QApplication(args)
     keep_gc_on_main_thread(app)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
+    if "--smoke-test" in args:
+        return _smoke_test()
     window = MainWindow()
     window.show()
-    if "--smoke-test" in app.arguments():
-        # Used by CI on the packaged executable: start up, check the bundled
-        # pieces are present, and exit without user interaction.
-        import yt_dlp  # noqa: F401
-
-        window._items.clear()
-        QTimer.singleShot(500, lambda: app.exit(0 if find_ffmpeg() else 1))
     return app.exec()
+
+
+def _smoke_test() -> int:
+    """Self-check for CI and for people verifying a download; see selfcheck.py."""
+    log = os.environ.get("UD_SMOKE_LOG")
+    lines: list[str] = []
+
+    def report(line: str) -> None:
+        lines.append(line)
+        # A windowed Windows executable has no console, so stdout may not exist.
+        if sys.stdout is not None:
+            print(line)
+
+    try:
+        code = selfcheck.run(report)
+    except Exception as exc:  # The check itself must never hang or hide a failure.
+        report(f"FAIL self-check crashed - {type(exc).__name__}: {exc}")
+        code = 1
+    if log:
+        with open(log, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    return code
